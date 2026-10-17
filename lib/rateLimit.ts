@@ -24,9 +24,13 @@ export function llmLimitPerMinute(): number {
   return readLimit("LLM_RATE_LIMIT_PER_MIN", 10);
 }
 
+// On Vercel these headers are set by the platform, which overwrites any
+// client-supplied X-Forwarded-For to prevent IP spoofing
+// (https://vercel.com/docs/headers/request-headers). Locally they can be faked,
+// which is fine for testing.
 export function getClientIp(req?: Request): string {
-  const forwarded = req?.headers.get("x-forwarded-for")?.split(",")[0]?.trim();
-  return forwarded || req?.headers.get("x-real-ip")?.trim() || "unknown";
+  const first = (name: string) => req?.headers.get(name)?.split(",")[0]?.trim();
+  return first("x-vercel-forwarded-for") || first("x-forwarded-for") || first("x-real-ip") || "unknown";
 }
 
 // Records one hit and returns false if the limit for this minute is exceeded.
