@@ -1,24 +1,32 @@
+import { z } from "zod";
 import { getStorage, HOUSEHOLD_ID } from "@/lib/storage";
-import { addDays, daysBetween, describeDaysLeft, formatMoney, todayISO } from "@/lib/dates";
+import { addDays, daysBetween, formatMoney, formatSpokenDate, todayISO } from "@/lib/dates";
+import { deadlineKindSchema, deadlineSchema, isoDateSchema } from "@/lib/schemas";
 import type { DeadlineKind, ToolResult } from "@/lib/types";
 
-export interface DeadlineItem {
-  date: string;
-  kind: DeadlineKind;
-  description: string;
-  amount?: number;
-  currency?: string;
-  daysLeft: number;
-  documentId: string;
-  documentTitle: string;
-  issuer: string;
-}
+const SPOKEN_ITEMS = 3;
+
+export const deadlineItemSchema = deadlineSchema.extend({
+  daysLeft: z.number().int(),
+  documentId: z.string(),
+  documentTitle: z.string(),
+  issuer: z.string(),
+});
+
+export const listDeadlinesOutput = z.object({
+  from: isoDateSchema,
+  to: isoDateSchema,
+  kind: deadlineKindSchema.optional(),
+  deadlines: z.array(deadlineItemSchema),
+});
+
+type DeadlineItem = z.infer<typeof deadlineItemSchema>;
 
 export async function runListDeadlines(input: {
   from?: string;
   to?: string;
   kind?: DeadlineKind;
-}): Promise<ToolResult<{ from: string; to: string; kind?: DeadlineKind; deadlines: DeadlineItem[] }>> {
+}): Promise<ToolResult<z.infer<typeof listDeadlinesOutput>>> {
   const today = todayISO();
   const from = input.from ?? today;
   const to = input.to ?? addDays(from, 30);
@@ -44,13 +52,19 @@ export async function runListDeadlines(input: {
   if (deadlines.length === 0) {
     text = `You have no deadlines ${period}.`;
   } else {
-    const first = deadlines[0];
-    const amount = first.amount !== undefined ? `, ${formatMoney(first.amount, first.currency)}` : "";
     const count = deadlines.length === 1 ? "one deadline" : `${deadlines.length} deadlines`;
-    text =
-      `You have ${count} ${period}. ` +
-      `The first is ${first.issuer}: ${first.description}${amount}, ${describeDaysLeft(first.daysLeft)}.`;
+    const items = deadlines.slice(0, SPOKEN_ITEMS).map(spokenItem);
+    const rest = deadlines.length - items.length;
+    if (rest > 0) items.push(`and ${rest} more`);
+    text = `You have ${count} ${period}: ${items.join("; ")}.`;
   }
 
   return { text, structuredContent: { from, to, kind: input.kind, deadlines } };
+}
+
+// "October 22, Maplewood Elementary, return signed field-trip form and pay fee, $15.00"
+function spokenItem(d: DeadlineItem): string {
+  const description = d.description.charAt(0).toLowerCase() + d.description.slice(1);
+  const amount = d.amount !== undefined ? `, ${formatMoney(d.amount, d.currency)}` : "";
+  return `${formatSpokenDate(d.date)}, ${d.issuer}, ${description}${amount}`;
 }

@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { getLlm } from "@/lib/llm";
 import { todayISO } from "@/lib/dates";
+import { documentRefSchema } from "@/lib/schemas";
 import { limitSentences } from "@/lib/speech";
 import type { Document, ToolResult } from "@/lib/types";
 import { resolveDocument } from "./resolveDocument";
@@ -16,6 +17,12 @@ const explanationSchema = z.object({
   legalOrFinancial: z.boolean().describe("True if the topic involves legal or financial risk"),
 });
 
+export const explainDocumentOutput = explanationSchema.extend({
+  document: documentRefSchema,
+  question: z.string(),
+  disclaimer: z.string().optional(),
+});
+
 const SYSTEM_PROMPT = `You explain household paperwork in plain, friendly English to a non-expert.
 Rules:
 - Base everything on the document data given. Never invent amounts, dates or rules.
@@ -26,11 +33,7 @@ export async function runExplainDocument(input: {
   document_id?: string;
   query?: string;
   question?: string;
-}): Promise<
-  ToolResult<{ document: Pick<Document, "id" | "title" | "issuer" | "type">; question: string } & z.infer<
-    typeof explanationSchema
-  > & { disclaimer?: string }>
-> {
+}): Promise<ToolResult<z.infer<typeof explainDocumentOutput>>> {
   const doc = await resolveDocument(input);
   const question = input.question ?? "What does this document mean and what should I do?";
 
