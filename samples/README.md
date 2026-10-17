@@ -1,6 +1,6 @@
 # Sample documents
 
-Clearly fictional documents for the PaperTrail demo (SPEC.md section 8). Every brand,
+Clearly fictional documents for the Duly demo (SPEC.md section 8). Every brand,
 person, address and number is made up, and every page carries a "SAMPLE" mark.
 
 Documents 1-6 match the seed data in `lib/storage/seed.ts` (same issuers, amounts,
@@ -13,8 +13,8 @@ demo day so the dates on paper match the seed and every deadline is upcoming:
 npm run samples
 ```
 
-The script (`scripts/generate-samples.mjs`) uses Google Chrome or Chromium in headless
-mode. If it can't find the browser, set `CHROME_PATH` to its executable.
+The script (`scripts/generate-samples.mjs`) uses a Chromium-based browser (Chrome,
+Chromium, Brave or Edge) in headless mode. If it can't find one, set `CHROME_PATH` to its executable.
 
 Use the tables below to check extraction accuracy. For deadlines, the word in
 parentheses after the fact name is the deadline `kind` the extractor should return.

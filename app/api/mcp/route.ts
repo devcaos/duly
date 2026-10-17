@@ -171,7 +171,7 @@ const mcpHandler = createMcpHandler(
     );
   },
   {
-    serverInfo: { name: "papertrail", version: "0.2.0" },
+    serverInfo: { name: "duly", version: "0.2.0" },
   },
 );
 

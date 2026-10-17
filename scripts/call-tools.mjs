@@ -1,4 +1,4 @@
-// Calls every PaperTrail MCP tool against a running server and prints the results.
+// Calls every Duly MCP tool against a running server and prints the results.
 // Usage:
 //   npm run dev                              (in another terminal)
 //   npm run tools                            (text-only tests)
@@ -73,7 +73,7 @@ async function main() {
   const init = await rpc("initialize", {
     protocolVersion: PROTOCOL_VERSION,
     capabilities: {},
-    clientInfo: { name: "papertrail-call-tools", version: "1.0.0" },
+    clientInfo: { name: "duly-call-tools", version: "1.0.0" },
   });
   console.log(`Connected to ${init.serverInfo.name} ${init.serverInfo.version} (protocol ${init.protocolVersion})`);
 

@@ -1,4 +1,4 @@
-# PaperTrail – Product & Technical Spec
+# Duly – Product & Technical Spec
 
 > Hackathon: Build, Ship, Shape – Amazon Developer Hackathon (Devpost)
 > Track: **Alexa+** (self-hosted MCP server, Streamable HTTP) · Mini challenge: **AWS Builder**
@@ -6,7 +6,7 @@
 
 ## 1. One-liner
 
-PaperTrail turns Alexa+ into your household's paperwork brain: show it a bill, a letter or a warranty, and it remembers every deadline, explains the fine print and tells you what to do next.
+Duly turns Alexa+ into your household's paperwork brain: show it a bill, a letter or a warranty, and it remembers every deadline, explains the fine print and tells you what to do next.
 
 ## 2. Problem
 
@@ -16,7 +16,7 @@ Households lose money and sleep over paperwork: late fees, auto-renewals nobody 
 
 Primary user: an adult who manages a household (bills, insurance, kids' school, appliances).
 
-| # | User says | PaperTrail does |
+| # | User says | Duly does |
 |---|-----------|-----------------|
 | S1 | "Alexa, what do I need to pay this month?" | Lists upcoming deadlines sorted by date, with amounts. |
 | S2 | (shows a photo/PDF of a letter) "Save this." | Extracts type, issuer, amounts, deadlines, action items; stores it; confirms in one sentence. |
@@ -25,7 +25,7 @@ Primary user: an adult who manages a household (bills, insurance, kids' school, 
 | S5 | "Write a reply asking for a payment extension." | Drafts a short, polite letter/email referencing the document. |
 | S6 | "When does the car insurance renew?" | Answers from stored documents (search). |
 
-Out of scope for the hackathon: real payments, multi-user accounts, OAuth, email inbox scanning, legal advice (PaperTrail explains; it does not give legal advice and says so when relevant).
+Out of scope for the hackathon: real payments, multi-user accounts, OAuth, email inbox scanning, legal advice (Duly explains; it does not give legal advice and says so when relevant).
 
 ## 4. MCP server
 
@@ -72,13 +72,13 @@ interface Document {
 }
 ```
 
-DynamoDB single table `papertrail`: `pk = HOUSEHOLD#<id>`, `sk = DOC#<id>`. Small dataset → scan/filter in code is fine.
+DynamoDB single table `duly`: `pk = HOUSEHOLD#<id>`, `sk = DOC#<id>`. Small dataset → scan/filter in code is fine.
 
 ## 6. Architecture
 
 - **Next.js (App Router, TypeScript)** on **Vercel**: hosts `/api/mcp`, the demo web and its API routes.
 - **Amazon Bedrock** (Converse API, `@aws-sdk/client-bedrock-runtime`): document extraction (multimodal) and explanations. Default model: **Amazon Nova 2 Lite** via the EU cross-region inference profile `eu.amazon.nova-2-lite-v1:0` with `AWS_REGION=eu-west-1` (configurable via `BEDROCK_MODEL_ID`; in-region calls to the bare model ID are not supported in eu-west-1).
-- **Amazon DynamoDB**: documents and deadlines. **Amazon S3**: original files. **Amazon Polly** (neural voice): spoken replies in the demo web.
+- **Amazon DynamoDB**: documents and deadlines. **Amazon S3**: original files (bucket `duly-devcaos-files`). **Amazon Polly** (neural voice): spoken replies in the demo web.
 - Storage adapter interface with two implementations: `memory` (local dev, seeded with sample docs) and `aws` (DynamoDB + S3). Selected with `STORAGE=memory|aws`.
 - LLM adapter with `LLM_PROVIDER=bedrock|gemini` (Gemini = fallback if Bedrock quota fails).
 
@@ -91,7 +91,7 @@ A page that looks like an Echo Show screen (landscape, rounded bezel, big readab
 - Reply: spoken via `/api/speak` (Polly), with `speechSynthesis` fallback; result cards (deadline list, document card, warranty card, draft letter).
 - Camera/upload button → `add_document`.
 - Typed input fallback (for recording reliability).
-- Banner: "Simulated Alexa+ experience – PaperTrail runs as a standard MCP server."
+- Banner: "Simulated Alexa+ experience – Duly runs as a standard MCP server."
 
 ## 8. Sample data
 
@@ -99,7 +99,7 @@ Six clearly fictional documents (fictional brands, marked SAMPLE), in English, g
 
 ## 9. Agent Skill
 
-`skills/papertrail/SKILL.md`: tells any agent when and how to use the PaperTrail tools (voice-first, short answers, confirm before drafting, never give legal advice).
+`skills/duly/SKILL.md`: tells any agent when and how to use the Duly tools (voice-first, short answers, confirm before drafting, never give legal advice).
 
 ## 10. Definition of done
 

@@ -1,7 +1,7 @@
 // Generates the fictional sample documents in /samples (SPEC.md section 8).
 // Usage:
 //   npm run samples
-// Needs Node 22+ and Google Chrome or Chromium installed (no extra npm packages).
+// Needs Node 22+ and a Chromium-based browser (Chrome, Chromium, Brave or Edge); no extra npm packages.
 // If it is not found automatically, set CHROME_PATH to the browser executable.
 //
 // The facts (issuers, amounts, numbers, day offsets) are the same as in
@@ -107,7 +107,7 @@ function page({ accent, tint, body }) {
 </head><body>
 <div class="watermark">SAMPLE</div>
 ${body}
-<div class="footer">SAMPLE &middot; Fictional document created for the PaperTrail demo. All names, numbers and addresses are made up.</div>
+<div class="footer">SAMPLE &middot; Fictional document created for the Duly demo. All names, numbers and addresses are made up.</div>
 </body></html>`;
 }
 
@@ -568,23 +568,40 @@ ${header({
 // We talk to Chrome through the DevTools Protocol (a WebSocket built into Node 22),
 // so we can set the exact page size and need no extra npm packages.
 
+// Any Chromium-based browser works: Chrome, Chromium, Brave or Edge (checked in that order).
 function findChrome() {
   if (process.env.CHROME_PATH) return process.env.CHROME_PATH;
+  // Per-user Windows installs live under %LOCALAPPDATA% (only set on Windows).
+  const userPath = (relative) => (process.env.LOCALAPPDATA ? join(process.env.LOCALAPPDATA, relative) : null);
   const candidates = [
+    // Linux
     "/opt/pw-browsers/chromium",
     "/usr/bin/google-chrome",
     "/usr/bin/google-chrome-stable",
     "/usr/bin/chromium",
     "/usr/bin/chromium-browser",
+    "/usr/bin/brave-browser",
+    "/usr/bin/microsoft-edge",
+    // macOS
     "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
     "/Applications/Chromium.app/Contents/MacOS/Chromium",
+    "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser",
+    "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
+    // Windows (system-wide and per-user installs)
     "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
     "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
+    userPath("Google\\Chrome\\Application\\chrome.exe"),
+    userPath("BraveSoftware\\Brave-Browser\\Application\\brave.exe"),
+    "C:\\Program Files\\BraveSoftware\\Brave-Browser\\Application\\brave.exe",
+    "C:\\Program Files (x86)\\BraveSoftware\\Brave-Browser\\Application\\brave.exe",
     "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe",
+    "C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe",
   ];
-  const found = candidates.find((path) => existsSync(path));
+  const found = candidates.find((path) => path && existsSync(path));
   if (!found) {
-    throw new Error("Chrome or Chromium not found. Install Google Chrome or set CHROME_PATH to its executable.");
+    throw new Error(
+      "No Chromium-based browser found (Chrome, Chromium, Brave or Edge). Install one or set CHROME_PATH to its executable.",
+    );
   }
   return found;
 }
@@ -592,9 +609,9 @@ function findChrome() {
 const sleep = (ms) => new Promise((done) => setTimeout(done, ms));
 
 // Starts Chrome and returns a small client: send(method, params) and waitFor(eventName).
-async function launchChrome(profileDir) {
+async function launchChrome(chromePath, profileDir) {
   const chrome = spawn(
-    findChrome(),
+    chromePath,
     ["--headless", "--disable-gpu", "--no-sandbox", "--no-first-run", "--remote-debugging-port=0", `--user-data-dir=${profileDir}`, "about:blank"],
     { stdio: "ignore" },
   );
@@ -680,7 +697,9 @@ async function render(browser, htmlPath, doc) {
 }
 
 async function main() {
-  const workDir = mkdtempSync(join(tmpdir(), "papertrail-samples-"));
+  // Find the browser first, so a missing Chrome never leaves samples/ empty.
+  const chromePath = findChrome();
+  const workDir = mkdtempSync(join(tmpdir(), "duly-samples-"));
   mkdirSync(OUT_DIR, { recursive: true });
 
   // Remove old generated files so a renamed document doesn't leave a stale copy.
@@ -688,7 +707,7 @@ async function main() {
     if (/\.(png|pdf)$/.test(name)) rmSync(join(OUT_DIR, name));
   }
 
-  const browser = await launchChrome(join(workDir, "profile"));
+  const browser = await launchChrome(chromePath, join(workDir, "profile"));
   try {
     await browser.send("Emulation.setDeviceMetricsOverride", {
       width: PAGE_WIDTH,
@@ -723,7 +742,7 @@ function buildReadme() {
 
   return `# Sample documents
 
-Clearly fictional documents for the PaperTrail demo (SPEC.md section 8). Every brand,
+Clearly fictional documents for the Duly demo (SPEC.md section 8). Every brand,
 person, address and number is made up, and every page carries a "SAMPLE" mark.
 
 Documents 1-6 match the seed data in \`lib/storage/seed.ts\` (same issuers, amounts,
@@ -736,8 +755,8 @@ demo day so the dates on paper match the seed and every deadline is upcoming:
 npm run samples
 \`\`\`
 
-The script (\`scripts/generate-samples.mjs\`) uses Google Chrome or Chromium in headless
-mode. If it can't find the browser, set \`CHROME_PATH\` to its executable.
+The script (\`scripts/generate-samples.mjs\`) uses a Chromium-based browser (Chrome,
+Chromium, Brave or Edge) in headless mode. If it can't find one, set \`CHROME_PATH\` to its executable.
 
 Use the tables below to check extraction accuracy. For deadlines, the word in
 parentheses after the fact name is the deadline \`kind\` the extractor should return.

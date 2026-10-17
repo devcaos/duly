@@ -1,9 +1,9 @@
 export default function Home() {
   return (
     <main style={{ padding: "2rem", fontFamily: "sans-serif" }}>
-      <h1>PaperTrail</h1>
+      <h1>Duly</h1>
       <p>
-        PaperTrail MCP server – endpoint at <code>/api/mcp</code> (Streamable HTTP).
+        Duly MCP server – endpoint at <code>/api/mcp</code> (Streamable HTTP).
       </p>
     </main>
   );
