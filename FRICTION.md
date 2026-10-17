@@ -48,3 +48,13 @@ One entry per problem with an Amazon/AWS/MCP tool, SDK or doc. Write it when it 
 - **Severity:** minor
 - **Workaround:** Forced tool call with `temperature: 0`, then validate `toolUse.input` with zod (`lib/llm/bedrock.ts`). Works for text, PNG and PDF input.
 - **Suggestion:** Add a "supported models" table to the structured outputs page, and link the Nova forced-tool pattern from there.
+
+### Bedrock Runtime client only speaks HTTP/2: "Protocol error" against a local mock
+- **Tool / API / SDK:** AWS SDK for JavaScript v3, `@aws-sdk/client-bedrock-runtime` (Converse), `AWS_ENDPOINT_URL_BEDROCK_RUNTIME`
+- **Task I attempted:** Test the demo web's agent loop without AWS credentials by pointing the SDK at a small local mock of the Converse API.
+- **Steps I took:** Started a Node `http` server that answers `POST /model/{modelId}/converse`, set `AWS_ENDPOINT_URL_BEDROCK_RUNTIME=http://localhost:4010` and fake credentials, then called `ConverseCommand`.
+- **Expected:** The request reaches the mock, like it does for Polly with `AWS_ENDPOINT_URL_POLLY`.
+- **What actually happened:** Every call failed with a bare `Error: Protocol error` (no status, no hint). The Bedrock Runtime client uses an HTTP/2 request handler (because the service has bidirectional streaming operations), even for plain `Converse`, so it can't talk to an HTTP/1.1 endpoint. This isn't mentioned in the endpoint-override docs.
+- **Severity:** minor
+- **Workaround:** Serve the Bedrock mock with `node:http2` (`createServer`, plaintext h2c) and keep Polly on HTTP/1.1, on a second port (`scripts/mock-aws.mjs`).
+- **Suggestion:** Wrap the HTTP/2 failure in a clearer error ("endpoint does not support HTTP/2"), and note in the service-specific endpoints docs that some clients require HTTP/2.

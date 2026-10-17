@@ -10,14 +10,17 @@
     "tools": "node scripts/call-tools.mjs",
     "samples": "node scripts/generate-samples.mjs",
     "setup:aws": "tsx scripts/setup-aws.ts",
-    "seed:aws": "tsx scripts/seed-aws.ts"
+    "seed:aws": "tsx scripts/seed-aws.ts",
+    "mock:aws": "node scripts/mock-aws.mjs"
   },
   "dependencies": {
     "@aws-sdk/client-bedrock-runtime": "^3.1152.0",
     "@aws-sdk/client-dynamodb": "^3.1152.0",
+    "@aws-sdk/client-polly": "^3.1152.0",
     "@aws-sdk/client-s3": "^3.1152.0",
     "@aws-sdk/lib-dynamodb": "^3.1152.0",
     "@google/genai": "^2.30.0",
+    "@modelcontextprotocol/client": "^2.3.1",
     "@modelcontextprotocol/server": "^2.3.1",
     "mcp-handler": "^2.3.0",
     "next": "16.4.2",

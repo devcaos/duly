@@ -13,6 +13,17 @@ It comes with 6 fictional sample documents (marked SAMPLE): an electricity bill,
 
 > **Demo storage:** with `STORAGE=aws`, documents live in Amazon DynamoDB and survive restarts (the demo household is reset to the 6 samples with `npm run seed:aws`). With `STORAGE=memory`, documents you add with `add_document` can disappear when the server restarts; the sample documents always come back. Requests are rate-limited per IP.
 
+### Echo Show simulator (demo web)
+
+Open the app's home page (`/`, or http://localhost:3000 with `npm run dev`). It looks like an Echo Show in a kitchen and shows how Alexa+ would use Duly:
+
+- Press the **mic** and ask a question (Web Speech API, `en-US`, Chrome or Edge), or **type** it. The suggestion chips run the demo questions.
+- **Add document** uploads a photo or PDF (JPEG, PNG or PDF, max 3 MB) and saves it with `add_document`.
+- The reply is spoken with **Amazon Polly** (neural voice). If Polly is unavailable, the browser's own voice reads it.
+- The screen shows result cards: deadlines, the saved document, the warranty, or a letter draft with **Copy** and **Make it firmer**.
+
+How it works: [`app/api/chat/route.ts`](app/api/chat/route.ts) runs an agent loop with Amazon Bedrock (Converse API with tool use, model `BEDROCK_MODEL_ID`). The agent is an **MCP client of Duly's own `/api/mcp`** ([`lib/agent/mcpClient.ts`](lib/agent/mcpClient.ts), official MCP TypeScript SDK, Streamable HTTP): it lists the tools over MCP, hands them to the model, and calls them over MCP, the same way Alexa+ would. The home screen's "Coming up" list and uploads call `list_deadlines` and `add_document` directly, without the model (a model can't copy a whole file into a tool call). Replies go through [`app/api/speak/route.ts`](app/api/speak/route.ts) (Polly). Set `MCP_URL` to point the agent at another Duly server.
+
 ### MCP Inspector
 
 1. Run `npx @modelcontextprotocol/inspector` (it opens in your browser).
@@ -48,10 +59,10 @@ Duly runs on AWS when `STORAGE=aws` and `LLM_PROVIDER=bedrock` (region `eu-west-
 
 | AWS service | What it does in Duly | Files |
 |---|---|---|
-| **Amazon Bedrock** (Converse API, model **Amazon Nova 2 Lite** via the EU cross-region inference profile `eu.amazon.nova-2-lite-v1:0`) | Reads photos (PNG/JPEG) and PDFs of household paperwork and extracts type, issuer, amounts, deadlines and action items as validated JSON (`add_document`). Writes plain-language explanations (`explain_document`) and reply drafts (`draft_reply`). Uses a forced tool call so the answer always matches the zod schema. | [`lib/llm/bedrock.ts`](lib/llm/bedrock.ts), [`lib/llm/index.ts`](lib/llm/index.ts), [`lib/llm/fallback.ts`](lib/llm/fallback.ts) |
+| **Amazon Bedrock** (Converse API, model **Amazon Nova 2 Lite** via the EU cross-region inference profile `eu.amazon.nova-2-lite-v1:0`) | Reads photos (PNG/JPEG) and PDFs of household paperwork and extracts type, issuer, amounts, deadlines and action items as validated JSON (`add_document`). Writes plain-language explanations (`explain_document`) and reply drafts (`draft_reply`). Uses a forced tool call so the answer always matches the zod schema. In the demo web, it is also the agent that picks which Duly MCP tool to call (Converse tool use). | [`lib/llm/bedrock.ts`](lib/llm/bedrock.ts), [`lib/llm/index.ts`](lib/llm/index.ts), [`lib/llm/fallback.ts`](lib/llm/fallback.ts), [`lib/agent/agent.ts`](lib/agent/agent.ts) |
 | **Amazon DynamoDB** (on-demand table `duly`, keys `pk = HOUSEHOLD#<id>`, `sk = DOC#<id>`) | Stores every document and its deadlines. All tools read from it (`list_deadlines`, `check_warranty`, `search_documents`...). | [`lib/storage/aws.ts`](lib/storage/aws.ts), [`lib/aws.ts`](lib/aws.ts) |
 | **Amazon S3** (private bucket `duly-devcaos-files`, all public access blocked) | Keeps the original uploaded file of each document (`households/<id>/<doc-id>.pdf`); its key is saved in `Document.fileKey`. | [`lib/storage/aws.ts`](lib/storage/aws.ts), [`lib/tools/addDocument.ts`](lib/tools/addDocument.ts) |
-| **Amazon Polly** (neural voice) | Planned: spoken replies in the demo web (`/api/speak`). | – |
+| **Amazon Polly** (neural voice, `Joanna` en-US by default, `POLLY_VOICE_ID` to change it) | Speaks the demo web's replies (MP3). If Polly fails, the page falls back to the browser's `speechSynthesis`. | [`app/api/speak/route.ts`](app/api/speak/route.ts), [`components/echo/voice.ts`](components/echo/voice.ts) |
 
 Setup scripts (AWS SDK for JavaScript v3):
 
@@ -66,10 +77,10 @@ If Bedrock is throttled, temporarily unavailable or times out, `LLM_FALLBACK=gem
 
 | Statement | Allows | Used by |
 |---|---|---|
-| `BedrockInvokeNova2Lite` | `InvokeModel` / `InvokeModelWithResponseStream` on Nova 2 Lite: the `eu` inference profile in `eu-west-1` and the foundation model in the EU regions that profile routes to | `lib/llm/bedrock.ts` |
+| `BedrockInvokeNova2Lite` | `InvokeModel` / `InvokeModelWithResponseStream` on Nova 2 Lite: the `eu` inference profile in `eu-west-1` and the foundation model in the EU regions that profile routes to | `lib/llm/bedrock.ts`, `lib/agent/agent.ts` |
 | `DynamoDbDulyTable` | Item access (`GetItem`, `PutItem`, `UpdateItem`, `DeleteItem`, `Query`, `Scan`) and `DescribeTable` on the `duly` table only | `lib/storage/aws.ts`, `scripts/seed-aws.ts` |
 | `S3DulyBucket` / `S3DulyObjects` | `PutObject` / `GetObject` on the objects of `duly-devcaos-files`, plus bucket-level `ListBucket` and `GetBucketLocation` | `lib/storage/aws.ts` |
-| `PollySpeech` | `SynthesizeSpeech` (Polly has no resource-level permissions, so `Resource` is `*`) | planned demo web |
+| `PollySpeech` | `SynthesizeSpeech` (Polly has no resource-level permissions, so `Resource` is `*`) | `app/api/speak/route.ts` |
 
 Three actions are only needed by `npm run setup:aws`: **`dynamodb:CreateTable`**, **`s3:CreateBucket`** and **`s3:PutBucketPublicAccessBlock`**. After the table and bucket exist you can remove them from the policy; the running server and `npm run seed:aws` don't use them.
 
@@ -81,3 +92,13 @@ Three actions are only needed by `npm run setup:aws`: **`dynamodb:CreateTable`**
 2. `npm run setup:aws`, then `npm run seed:aws`.
 3. Set `STORAGE=aws`, `LLM_PROVIDER=bedrock` (and optionally `LLM_FALLBACK=gemini`) in `.env.local`, then `npm run dev`.
 4. `npm run tools -- samples/07-riverside-water-bill.pdf` calls every tool, including `add_document` with a PDF.
+
+### Test the demo web without AWS
+
+[`scripts/mock-aws.mjs`](scripts/mock-aws.mjs) is a local stand-in for Bedrock and Polly with canned, keyword-based answers. The app code doesn't change: the AWS SDK sends its requests to the mock because of the `AWS_ENDPOINT_URL_*` variables.
+
+1. In one terminal: `npm run mock:aws`.
+2. In `.env.local`, set `LLM_PROVIDER=bedrock`, `AWS_ACCESS_KEY_ID=mock`, `AWS_SECRET_ACCESS_KEY=mock`, `AWS_ENDPOINT_URL_BEDROCK_RUNTIME=http://localhost:4010` and `AWS_ENDPOINT_URL_POLLY=http://localhost:4011` (and `STORAGE=memory`).
+3. In another terminal: `npm run dev`, then open http://localhost:3000.
+
+The mock Polly plays a short chime instead of speech. Start it with `MOCK_POLLY=fail npm run mock:aws` to test the browser voice fallback. Remove the `AWS_ENDPOINT_URL_*` lines to use real AWS.

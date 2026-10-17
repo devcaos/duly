@@ -14,6 +14,8 @@ export const checkWarrantyOutput = z.object({
       title: z.string(),
       issuer: z.string(),
       product: z.string().optional(),
+      // Purchase/issue date, when known: lets screens draw how much of the warranty is used.
+      startDate: isoDateSchema.optional(),
       endDate: isoDateSchema,
       daysRemaining: z.number().int(),
       expired: z.boolean(),
@@ -63,6 +65,7 @@ export async function runCheckWarranty(input: {
         title: doc.title,
         issuer: doc.issuer,
         product: doc.product,
+        startDate: doc.issueDate,
         endDate: ends.date,
         daysRemaining,
         expired,
