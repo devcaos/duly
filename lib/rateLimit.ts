@@ -1,0 +1,52 @@
+// Basic per-IP rate limiting (SPEC.md section 4: demo mitigations).
+// The counters live in memory, so they are per server instance: each Vercel
+// instance has its own counters and they reset when the instance restarts.
+// That's acceptable for the demo; a shared store would be needed for production.
+
+const WINDOW_MS = 60_000;
+const MAX_TRACKED_KEYS = 10_000;
+
+// key ("<bucket>:<ip>") -> timestamps of recent hits
+const hits = new Map<string, number[]>();
+
+function readLimit(envName: string, fallback: number): number {
+  const value = Number.parseInt(process.env[envName] ?? "", 10);
+  return Number.isFinite(value) && value > 0 ? value : fallback;
+}
+
+// All requests to /api/mcp, per IP per minute.
+export function requestLimitPerMinute(): number {
+  return readLimit("RATE_LIMIT_PER_MIN", 30);
+}
+
+// Calls to tools that use the LLM, per IP per minute.
+export function llmLimitPerMinute(): number {
+  return readLimit("LLM_RATE_LIMIT_PER_MIN", 10);
+}
+
+export function getClientIp(req?: Request): string {
+  const forwarded = req?.headers.get("x-forwarded-for")?.split(",")[0]?.trim();
+  return forwarded || req?.headers.get("x-real-ip")?.trim() || "unknown";
+}
+
+// Records one hit and returns false if the limit for this minute is exceeded.
+export function allowRequest(bucket: string, ip: string, limit: number): boolean {
+  const now = Date.now();
+  if (hits.size > MAX_TRACKED_KEYS) removeExpired(now);
+
+  const key = `${bucket}:${ip}`;
+  const recent = (hits.get(key) ?? []).filter((t) => now - t < WINDOW_MS);
+  if (recent.length >= limit) {
+    hits.set(key, recent);
+    return false;
+  }
+  recent.push(now);
+  hits.set(key, recent);
+  return true;
+}
+
+function removeExpired(now: number) {
+  for (const [key, times] of hits) {
+    if (times.every((t) => now - t >= WINDOW_MS)) hits.delete(key);
+  }
+}
