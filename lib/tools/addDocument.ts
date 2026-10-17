@@ -4,7 +4,7 @@ import type { FileMimeType } from "@/lib/llm";
 import { getStorage, HOUSEHOLD_ID } from "@/lib/storage";
 import { formatMoney, formatSpokenDate, todayISO } from "@/lib/dates";
 import { decodeFile } from "@/lib/files";
-import { isoDateSchema as isoDate } from "@/lib/schemas";
+import { documentSchema, isoDateSchema as isoDate } from "@/lib/schemas";
 import { DEADLINE_KINDS, DOC_TYPES } from "@/lib/types";
 import type { Document, ToolResult } from "@/lib/types";
 import { ToolError } from "./resolveDocument";
@@ -32,6 +32,8 @@ const extractionSchema = z.object({
   rawText: z.string().describe("The important text of the document, transcribed"),
 });
 
+export const addDocumentOutput = z.object({ document: documentSchema });
+
 const SYSTEM_PROMPT = `You extract structured data from household paperwork (bills, insurance, warranties, official letters, contracts, subscriptions, school forms).
 Rules:
 - Use only information that is in the document. Never invent amounts, dates or names. Leave optional fields out when unknown.
@@ -45,7 +47,7 @@ export async function runAddDocument(input: {
   file_base64?: string;
   mime_type?: FileMimeType;
   hint?: string;
-}): Promise<ToolResult<{ document: Document }>> {
+}): Promise<ToolResult<z.infer<typeof addDocumentOutput>>> {
   if (!input.text && !input.file_base64) {
     throw new ToolError("Please send the document as text or as a file.");
   }

@@ -50,8 +50,10 @@ async function callTool(name, args) {
   const started = Date.now();
   try {
     const result = await rpc("tools/call", { name, arguments: args });
-    const spoken = result.content?.map((c) => c.text).join(" ");
-    console.log(`${result.isError ? "ERROR" : "Spoken"} (${Date.now() - started} ms): ${spoken}`);
+    // Block 1 is the spoken sentence; block 2 (if any) is the JSON copy of structuredContent.
+    const blocks = result.content ?? [];
+    const label = result.isError ? "ERROR" : "Spoken";
+    console.log(`${label} (${Date.now() - started} ms, ${blocks.length} content blocks): ${blocks[0]?.text}`);
     if (result.structuredContent) console.log(short(result.structuredContent));
     return result;
   } catch (error) {

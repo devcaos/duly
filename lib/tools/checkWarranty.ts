@@ -1,22 +1,30 @@
+import { z } from "zod";
 import { getStorage, HOUSEHOLD_ID } from "@/lib/storage";
 import { daysBetween, formatSpokenDate, todayISO } from "@/lib/dates";
 import { scoreDocument } from "@/lib/search";
+import { isoDateSchema } from "@/lib/schemas";
 import type { ToolResult } from "@/lib/types";
 
-export interface WarrantyInfo {
-  documentId: string;
-  title: string;
-  issuer: string;
-  product?: string;
-  endDate: string;
-  daysRemaining: number;
-  expired: boolean;
-  howToClaim: string[];
-}
+export const checkWarrantyOutput = z.object({
+  product: z.string(),
+  found: z.boolean(),
+  warranty: z
+    .object({
+      documentId: z.string(),
+      title: z.string(),
+      issuer: z.string(),
+      product: z.string().optional(),
+      endDate: isoDateSchema,
+      daysRemaining: z.number().int(),
+      expired: z.boolean(),
+      howToClaim: z.array(z.string()),
+    })
+    .optional(),
+});
 
 export async function runCheckWarranty(input: {
   product: string;
-}): Promise<ToolResult<{ product: string; found: boolean; warranty?: WarrantyInfo }>> {
+}): Promise<ToolResult<z.infer<typeof checkWarrantyOutput>>> {
   const docs = await getStorage().listDocuments(HOUSEHOLD_ID);
 
   // A document counts as a warranty if it has a warranty end date.

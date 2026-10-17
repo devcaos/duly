@@ -1,15 +1,23 @@
 import { z } from "zod";
 import { getLlm } from "@/lib/llm";
 import { todayISO } from "@/lib/dates";
-import type { Document, ToolResult } from "@/lib/types";
+import { documentRefSchema } from "@/lib/schemas";
+import type { ToolResult } from "@/lib/types";
 import { documentForPrompt } from "./explainDocument";
 import { resolveDocument } from "./resolveDocument";
 
-export type Tone = "polite" | "firm";
+export const TONES = ["polite", "firm"] as const;
+export type Tone = (typeof TONES)[number];
 
 const draftSchema = z.object({
   subject: z.string().describe("Short email subject line"),
   body: z.string().describe("Letter/email body with greeting and sign-off, plain text"),
+});
+
+export const draftReplyOutput = draftSchema.extend({
+  document: documentRefSchema,
+  intent: z.string(),
+  tone: z.enum(TONES),
 });
 
 const SYSTEM_PROMPT = `You write short replies (letters or emails) to companies and organizations on behalf of a household.
@@ -24,15 +32,7 @@ export async function runDraftReply(input: {
   query?: string;
   intent: string;
   tone?: Tone;
-}): Promise<
-  ToolResult<{
-    document: Pick<Document, "id" | "title" | "issuer" | "type">;
-    intent: string;
-    tone: Tone;
-    subject: string;
-    body: string;
-  }>
-> {
+}): Promise<ToolResult<z.infer<typeof draftReplyOutput>>> {
   const doc = await resolveDocument(input);
   const tone = input.tone ?? "polite";
 

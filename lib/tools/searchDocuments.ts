@@ -1,17 +1,17 @@
+import { z } from "zod";
 import { getStorage, HOUSEHOLD_ID } from "@/lib/storage";
 import { searchDocuments } from "@/lib/search";
-import type { DocType, ToolResult } from "@/lib/types";
+import { documentRefSchema } from "@/lib/schemas";
+import type { ToolResult } from "@/lib/types";
 
-export interface SearchMatch {
-  id: string;
-  title: string;
-  issuer: string;
-  type: DocType;
-}
+export const searchDocumentsOutput = z.object({
+  query: z.string(),
+  matches: z.array(documentRefSchema),
+});
 
 export async function runSearchDocuments(input: {
   query: string;
-}): Promise<ToolResult<{ query: string; matches: SearchMatch[] }>> {
+}): Promise<ToolResult<z.infer<typeof searchDocumentsOutput>>> {
   const docs = await getStorage().listDocuments(HOUSEHOLD_ID);
   const matches = searchDocuments(docs, input.query).map(({ id, title, issuer, type }) => ({
     id,

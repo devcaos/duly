@@ -4,12 +4,12 @@ import { DEADLINE_KINDS } from "@/lib/types";
 import type { ToolResult } from "@/lib/types";
 import { LlmError } from "@/lib/llm";
 import { ToolError } from "@/lib/tools/resolveDocument";
-import { runListDeadlines } from "@/lib/tools/listDeadlines";
-import { runCheckWarranty } from "@/lib/tools/checkWarranty";
-import { runSearchDocuments } from "@/lib/tools/searchDocuments";
-import { runAddDocument } from "@/lib/tools/addDocument";
-import { runExplainDocument } from "@/lib/tools/explainDocument";
-import { runDraftReply } from "@/lib/tools/draftReply";
+import { listDeadlinesOutput, runListDeadlines } from "@/lib/tools/listDeadlines";
+import { checkWarrantyOutput, runCheckWarranty } from "@/lib/tools/checkWarranty";
+import { runSearchDocuments, searchDocumentsOutput } from "@/lib/tools/searchDocuments";
+import { addDocumentOutput, runAddDocument } from "@/lib/tools/addDocument";
+import { explainDocumentOutput, runExplainDocument } from "@/lib/tools/explainDocument";
+import { draftReplyOutput, runDraftReply, TONES } from "@/lib/tools/draftReply";
 import { allowRequest, getClientIp, llmLimitPerMinute, requestLimitPerMinute } from "@/lib/rateLimit";
 import {
   isoDateSchema as isoDate,
@@ -27,9 +27,14 @@ export const maxDuration = 60;
 const documentId = () => z.string().max(MAX_ID_CHARS);
 
 // Spoken text for voice + full data for screens (SPEC.md section 4).
+// The MCP spec says a tool returning structuredContent SHOULD also return it
+// serialized as JSON in a text block, for clients that only read text content.
 function toMcpResult<T extends object>(result: ToolResult<T>) {
   return {
-    content: [{ type: "text" as const, text: result.text }],
+    content: [
+      { type: "text" as const, text: result.text },
+      { type: "text" as const, text: JSON.stringify(result.structuredContent) },
+    ],
     structuredContent: result.structuredContent as Record<string, unknown>,
   };
 }
@@ -78,6 +83,7 @@ const mcpHandler = createMcpHandler(
             .describe("Required when file_base64 is sent."),
           hint: shortText().optional().describe("Optional hint, e.g. 'this is my car insurance'."),
         }),
+        outputSchema: addDocumentOutput,
       },
       async (input, ctx) => runLlmTool(ctx.http?.req, () => runAddDocument(input)),
     );
@@ -93,6 +99,7 @@ const mcpHandler = createMcpHandler(
           to: isoDate.optional().describe("End date (YYYY-MM-DD). Default: 30 days after `from`."),
           kind: z.enum(DEADLINE_KINDS).optional().describe("Only return deadlines of this kind."),
         }),
+        outputSchema: listDeadlinesOutput,
         annotations: { readOnlyHint: true },
       },
       async (input) => runTool(() => runListDeadlines(input)),
@@ -109,6 +116,7 @@ const mcpHandler = createMcpHandler(
           query: shortText().optional().describe("Keywords to find the document, e.g. 'parking notice'."),
           question: shortText().optional().describe("The user's question, e.g. 'What happens if I ignore it?'"),
         }),
+        outputSchema: explainDocumentOutput,
         annotations: { readOnlyHint: true },
       },
       async (input, ctx) => runLlmTool(ctx.http?.req, () => runExplainDocument(input)),
@@ -123,6 +131,7 @@ const mcpHandler = createMcpHandler(
         inputSchema: z.object({
           product: z.string().min(1).max(MAX_PRODUCT_CHARS).describe("Product name, e.g. 'dishwasher'."),
         }),
+        outputSchema: checkWarrantyOutput,
         annotations: { readOnlyHint: true },
       },
       async (input) => runTool(() => runCheckWarranty(input)),
@@ -138,8 +147,9 @@ const mcpHandler = createMcpHandler(
           document_id: documentId().optional().describe("Document id from search_documents or list_deadlines."),
           query: shortText().optional().describe("Keywords to find the document, e.g. 'electricity bill'."),
           intent: shortText().min(1).describe("What the reply should achieve, e.g. 'ask for a payment extension'."),
-          tone: z.enum(["polite", "firm"]).optional().describe("Default: polite."),
+          tone: z.enum(TONES).optional().describe("Default: polite."),
         }),
+        outputSchema: draftReplyOutput,
         annotations: { readOnlyHint: true },
       },
       async (input, ctx) => runLlmTool(ctx.http?.req, () => runDraftReply(input)),
@@ -154,6 +164,7 @@ const mcpHandler = createMcpHandler(
         inputSchema: z.object({
           query: shortText().min(1).describe("Keywords, e.g. 'car insurance'."),
         }),
+        outputSchema: searchDocumentsOutput,
         annotations: { readOnlyHint: true },
       },
       async (input) => runTool(() => runSearchDocuments(input)),
