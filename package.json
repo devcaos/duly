@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "tools": "node scripts/call-tools.mjs"
+    "tools": "node scripts/call-tools.mjs",
+    "samples": "node scripts/generate-samples.mjs"
   },
   "dependencies": {
     "@google/genai": "^2.30.0",
