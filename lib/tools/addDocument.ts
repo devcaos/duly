@@ -3,14 +3,11 @@ import { getLlm } from "@/lib/llm";
 import type { FileMimeType } from "@/lib/llm";
 import { getStorage, HOUSEHOLD_ID } from "@/lib/storage";
 import { formatMoney, formatSpokenDate, todayISO } from "@/lib/dates";
+import { decodeFile } from "@/lib/files";
+import { isoDateSchema as isoDate } from "@/lib/schemas";
 import { DEADLINE_KINDS, DOC_TYPES } from "@/lib/types";
 import type { Document, ToolResult } from "@/lib/types";
 import { ToolError } from "./resolveDocument";
-
-// 3 MB decoded ≈ 4 MB base64, under Vercel's 4.5 MB request body limit (SPEC.md section 4).
-export const MAX_FILE_BYTES = 3 * 1024 * 1024;
-
-const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 
 // What the LLM must return. Validated with zod before anything is stored.
 const extractionSchema = z.object({
@@ -56,9 +53,8 @@ export async function runAddDocument(input: {
     if (!input.mime_type) {
       throw new ToolError("Please say the file type: image/jpeg, image/png or application/pdf.");
     }
-    if (Buffer.byteLength(input.file_base64, "base64") > MAX_FILE_BYTES) {
-      throw new ToolError("That file is too big. The limit is 3 MB.");
-    }
+    // Strict base64 + size + magic bytes, before spending an LLM call.
+    decodeFile(input.file_base64, input.mime_type);
   }
 
   const today = todayISO();

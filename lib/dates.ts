@@ -3,6 +3,14 @@
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
+// True only for real calendar dates: "2026-02-28" yes, "2026-02-30" or "2026-99-99" no.
+export function isValidISODate(value: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const date = new Date(`${value}T00:00:00Z`);
+  // Parse in UTC and check it round-trips to the same string.
+  return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value;
+}
+
 export function todayISO(): string {
   return new Date().toISOString().slice(0, 10);
 }
