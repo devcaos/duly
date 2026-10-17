@@ -13,7 +13,8 @@ export class GeminiLlm implements LlmAdapter {
   constructor() {
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) {
-      throw new LlmError("GEMINI_API_KEY is not set in .env.local.");
+      // A plain Error: this detail goes to the server log, not to tool callers.
+      throw new Error("GEMINI_API_KEY is not set.");
     }
     this.client = new GoogleGenAI({ apiKey });
     this.model = process.env.GEMINI_MODEL || DEFAULT_MODEL;

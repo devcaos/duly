@@ -7,7 +7,7 @@ export interface NamedLlm {
   create: () => LlmAdapter;
 }
 
-// Uses the primary provider; if it is throttled, out of quota or denied, retries
+// Uses the primary provider; if it is throttled, unavailable or times out, retries
 // the same request with the fallback provider (when there is one). Logs who answered.
 export class FallbackLlm implements LlmAdapter {
   private fallback: LlmAdapter | undefined;

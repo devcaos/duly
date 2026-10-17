@@ -1,0 +1,57 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "BedrockInvokeNova2Lite",
+      "Effect": "Allow",
+      "Action": ["bedrock:InvokeModel", "bedrock:InvokeModelWithResponseStream"],
+      "Resource": [
+        "arn:aws:bedrock:eu-west-1:ACCOUNT_ID:inference-profile/eu.amazon.nova-2-lite-v1:0",
+        "arn:aws:bedrock:eu-central-1::foundation-model/amazon.nova-2-lite-v1:0",
+        "arn:aws:bedrock:eu-north-1::foundation-model/amazon.nova-2-lite-v1:0",
+        "arn:aws:bedrock:eu-south-1::foundation-model/amazon.nova-2-lite-v1:0",
+        "arn:aws:bedrock:eu-south-2::foundation-model/amazon.nova-2-lite-v1:0",
+        "arn:aws:bedrock:eu-west-1::foundation-model/amazon.nova-2-lite-v1:0",
+        "arn:aws:bedrock:eu-west-3::foundation-model/amazon.nova-2-lite-v1:0"
+      ]
+    },
+    {
+      "Sid": "DynamoDbDulyTable",
+      "Effect": "Allow",
+      "Action": [
+        "dynamodb:CreateTable",
+        "dynamodb:DescribeTable",
+        "dynamodb:GetItem",
+        "dynamodb:PutItem",
+        "dynamodb:UpdateItem",
+        "dynamodb:DeleteItem",
+        "dynamodb:Query",
+        "dynamodb:Scan"
+      ],
+      "Resource": "arn:aws:dynamodb:eu-west-1:ACCOUNT_ID:table/duly"
+    },
+    {
+      "Sid": "S3DulyBucket",
+      "Effect": "Allow",
+      "Action": [
+        "s3:CreateBucket",
+        "s3:ListBucket",
+        "s3:GetBucketLocation",
+        "s3:PutBucketPublicAccessBlock"
+      ],
+      "Resource": "arn:aws:s3:::duly-devcaos-files"
+    },
+    {
+      "Sid": "S3DulyObjects",
+      "Effect": "Allow",
+      "Action": ["s3:PutObject", "s3:GetObject"],
+      "Resource": "arn:aws:s3:::duly-devcaos-files/*"
+    },
+    {
+      "Sid": "PollySpeech",
+      "Effect": "Allow",
+      "Action": "polly:SynthesizeSpeech",
+      "Resource": "*"
+    }
+  ]
+}

@@ -12,7 +12,7 @@ import {
 } from "@aws-sdk/client-dynamodb";
 import { BucketAlreadyOwnedByYou, CreateBucketCommand, PutPublicAccessBlockCommand } from "@aws-sdk/client-s3";
 import type { BucketLocationConstraint } from "@aws-sdk/client-s3";
-import { awsRegion, bucketName, getS3, tableName } from "../lib/aws";
+import { awsRegion, bucketName, getS3, summarizeError, tableName } from "../lib/aws";
 import { loadEnv } from "./env";
 
 async function setupTable() {
@@ -84,6 +84,6 @@ async function main() {
 }
 
 main().catch((error) => {
-  console.error(`\nSetup failed (${error.name}): ${error.message}`);
+  console.error(`\nSetup failed (${summarizeError(error)})`);
   process.exit(1);
 });

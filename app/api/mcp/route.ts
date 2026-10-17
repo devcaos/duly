@@ -2,6 +2,7 @@ import { createMcpHandler } from "mcp-handler";
 import { z } from "zod";
 import { DEADLINE_KINDS } from "@/lib/types";
 import type { ToolResult } from "@/lib/types";
+import { summarizeError } from "@/lib/aws";
 import { LlmError } from "@/lib/llm";
 import { ToolError } from "@/lib/tools/resolveDocument";
 import { listDeadlinesOutput, runListDeadlines } from "@/lib/tools/listDeadlines";
@@ -49,7 +50,8 @@ async function runTool<T extends object>(run: () => Promise<ToolResult<T>>) {
     return toMcpResult(await run());
   } catch (error) {
     if (error instanceof ToolError || error instanceof LlmError) return toMcpError(error.message);
-    console.error("Tool failed:", error);
+    // Summary only: raw AWS errors can contain ARNs, account IDs and request IDs.
+    console.error(`Tool failed (${summarizeError(error)})`);
     return toMcpError("Something went wrong on my side. Please try again.");
   }
 }

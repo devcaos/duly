@@ -4,7 +4,7 @@
 // Usage: npm run seed:aws   (run npm run setup:aws once before)
 
 import { DeleteCommand, PutCommand } from "@aws-sdk/lib-dynamodb";
-import { getDynamo, tableName } from "../lib/aws";
+import { getDynamo, summarizeError, tableName } from "../lib/aws";
 import { todayISO } from "../lib/dates";
 import { HOUSEHOLD_ID } from "../lib/storage";
 import { queryHouseholdItems, toItem } from "../lib/storage/aws";
@@ -33,7 +33,7 @@ async function main() {
 }
 
 main().catch((error) => {
-  console.error(`\nSeeding failed (${error.name}): ${error.message}`);
+  console.error(`\nSeeding failed (${summarizeError(error)})`);
   console.error("Did you run npm run setup:aws first?");
   process.exit(1);
 });
