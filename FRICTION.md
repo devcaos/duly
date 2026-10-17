@@ -38,3 +38,13 @@ One entry per problem with an Amazon/AWS/MCP tool, SDK or doc. Write it when it 
 - **Severity:** blocker
 - **Workaround:** Gemini fallback through Duly's LLM adapter (`LLM_PROVIDER=gemini`), so the rest of the app could be built and deployed while waiting. Switch back to `bedrock` once the account is verified.
 - **Suggestion:** Show the expected verification time and the correct support path (case category) in the error message, remove the unmonitored email address, and let new accounts check verification status in the console.
+
+### Nova 2 Lite doesn't support Bedrock structured outputs
+- **Tool / API / SDK:** Amazon Bedrock Converse API (`@aws-sdk/client-bedrock-runtime` v3), Amazon Nova 2 Lite
+- **Task I attempted:** Get strict JSON (document extraction) from Nova 2 Lite, validated with zod.
+- **Steps I took:** Read the Bedrock "structured outputs" guide, which shows `outputConfig.textFormat` with a JSON schema for the Converse API, and planned to use it.
+- **Expected:** Amazon's own newest Lite model to support Bedrock's structured outputs feature.
+- **What actually happened:** The Nova 2 Lite model card lists "Structured outputs" under **Not supported**. The structured outputs guide has no model list; it sends you to the model cards, so you only find out after opening the right one. The working pattern is in a different guide (Nova user guide, "Using tools"): define one tool whose input schema is your output format and force it with `toolChoice: { tool: { name } }`.
+- **Severity:** minor
+- **Workaround:** Forced tool call with `temperature: 0`, then validate `toolUse.input` with zod (`lib/llm/bedrock.ts`). Works for text, PNG and PDF input.
+- **Suggestion:** Add a "supported models" table to the structured outputs page, and link the Nova forced-tool pattern from there.

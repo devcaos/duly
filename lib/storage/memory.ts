@@ -1,11 +1,14 @@
+import type { FileMimeType } from "@/lib/llm";
 import type { Document } from "@/lib/types";
 import { todayISO } from "@/lib/dates";
 import { buildSeedDocuments } from "./seed";
+import { fileKeyFor } from "./types";
 import type { StorageAdapter } from "./types";
 
 // In-memory storage for local development. Data resets when the server restarts.
 export class MemoryStorage implements StorageAdapter {
   private docs = new Map<string, Document>();
+  private files = new Map<string, Buffer>();
   private seeded = false;
 
   private ensureSeeded() {
@@ -33,5 +36,11 @@ export class MemoryStorage implements StorageAdapter {
   async saveDocument(doc: Document): Promise<void> {
     this.ensureSeeded();
     this.docs.set(this.key(doc.householdId, doc.id), doc);
+  }
+
+  async saveFile(householdId: string, docId: string, bytes: Buffer, mimeType: FileMimeType): Promise<string> {
+    const fileKey = fileKeyFor(householdId, docId, mimeType);
+    this.files.set(fileKey, bytes);
+    return fileKey;
   }
 }

@@ -1,3 +1,4 @@
+import { AwsStorage } from "./aws";
 import { MemoryStorage } from "./memory";
 import type { StorageAdapter } from "./types";
 
@@ -17,7 +18,8 @@ export function getStorage(): StorageAdapter {
       instance = new MemoryStorage();
       break;
     case "aws":
-      throw new Error('STORAGE="aws" is not implemented yet. Use STORAGE="memory".');
+      instance = new AwsStorage();
+      break;
     default:
       throw new Error(`Unknown STORAGE "${kind}". Use "memory" or "aws".`);
   }
