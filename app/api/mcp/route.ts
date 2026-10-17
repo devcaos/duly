@@ -20,6 +20,10 @@ import {
   shortText,
 } from "@/lib/schemas";
 
+// Vercel stops the function after this many seconds. LLM tools take a few seconds
+// (two attempts at most), so 60 s is plenty and stops a stuck call early.
+export const maxDuration = 60;
+
 const documentId = () => z.string().max(MAX_ID_CHARS);
 
 // Spoken text for voice + full data for screens (SPEC.md section 4).
