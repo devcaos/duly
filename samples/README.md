@@ -13,8 +13,8 @@ demo day so the dates on paper match the seed and every deadline is upcoming:
 npm run samples
 ```
 
-The script (`scripts/generate-samples.mjs`) uses Google Chrome or Chromium in headless
-mode. If it can't find the browser, set `CHROME_PATH` to its executable.
+The script (`scripts/generate-samples.mjs`) uses a Chromium-based browser (Chrome,
+Chromium, Brave or Edge) in headless mode. If it can't find one, set `CHROME_PATH` to its executable.
 
 Use the tables below to check extraction accuracy. For deadlines, the word in
 parentheses after the fact name is the deadline `kind` the extractor should return.
