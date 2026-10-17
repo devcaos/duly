@@ -6,7 +6,7 @@ import { limitSentences } from "@/lib/speech";
 import type { Document, ToolResult } from "@/lib/types";
 import { resolveDocument } from "./resolveDocument";
 
-export const DISCLAIMER = "PaperTrail explains documents but does not give legal or financial advice.";
+export const DISCLAIMER = "Duly explains documents but does not give legal or financial advice.";
 const SPOKEN_DISCLAIMER = "This isn't legal advice.";
 
 const explanationSchema = z.object({

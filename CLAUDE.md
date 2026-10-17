@@ -1,4 +1,4 @@
-# CLAUDE.md – PaperTrail
+# CLAUDE.md – Duly
 
 Read `SPEC.md` before any task. It is the source of truth; if a request conflicts with it, say so before coding.
 

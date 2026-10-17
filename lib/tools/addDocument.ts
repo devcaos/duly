@@ -84,10 +84,10 @@ export async function runAddDocument(input: {
   };
   await getStorage().saveDocument(document);
 
-  return { text: savedSentence(document), structuredContent: { document } };
+  return { text: `${savedSentence(document)} Duly noted.`, structuredContent: { document } };
 }
 
-// "Saved: Brightwave Energy bill, $84.20 due November 14."
+// "Saved: Brightwave Energy bill, $84.20 due November 14." ("Duly noted." is added after it.)
 function savedSentence(doc: Document): string {
   const kind = doc.type.replace("_", " ");
   const next = [...doc.deadlines].sort((a, b) => a.date.localeCompare(b.date)).find((d) => d.date >= todayISO());

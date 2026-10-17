@@ -1,9 +1,9 @@
-# papertrail
+# Duly
 Alexa+ MCP server that turns your household paperwork into answers: deadlines, warranties and plain-language explanations.
 
 ## Try it
 
-PaperTrail is a standard remote MCP server (Streamable HTTP, no sign-in). Production endpoint:
+Duly is a standard remote MCP server (Streamable HTTP, no sign-in). Production endpoint:
 
 ```
 https://<your-project>.vercel.app/api/mcp
@@ -28,9 +28,9 @@ MCP_URL=https://<your-project>.vercel.app/api/mcp npm run tools
 ### Claude (custom connector)
 
 1. In Claude, go to **Customize > Connectors**, click **+ Add**, then **Add custom connector**.
-2. Name it `PaperTrail`, paste the production endpoint URL and click **Continue**.
+2. Name it `Duly`, paste the production endpoint URL and click **Continue**.
 3. Under **Authentication**, choose **No sign in**, then click **Add**.
-4. In a chat, click **+** at the lower left, open **Connectors** and turn on **PaperTrail**.
+4. In a chat, click **+** at the lower left, open **Connectors** and turn on **Duly**.
 
 Then ask, for example:
 
@@ -40,4 +40,4 @@ Then ask, for example:
 - "Write a polite email to Brightwave Energy asking for a two-week payment extension."
 - "When does the car insurance renew?"
 
-PaperTrail explains documents; it does not give legal or financial advice.
+Duly explains documents; it does not give legal or financial advice.

@@ -13,7 +13,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "PaperTrail",
+  title: "Duly",
   description: "Your household paperwork brain for Alexa+ (MCP server)",
 };
 

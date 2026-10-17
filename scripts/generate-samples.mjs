@@ -107,7 +107,7 @@ function page({ accent, tint, body }) {
 </head><body>
 <div class="watermark">SAMPLE</div>
 ${body}
-<div class="footer">SAMPLE &middot; Fictional document created for the PaperTrail demo. All names, numbers and addresses are made up.</div>
+<div class="footer">SAMPLE &middot; Fictional document created for the Duly demo. All names, numbers and addresses are made up.</div>
 </body></html>`;
 }
 
@@ -592,9 +592,9 @@ function findChrome() {
 const sleep = (ms) => new Promise((done) => setTimeout(done, ms));
 
 // Starts Chrome and returns a small client: send(method, params) and waitFor(eventName).
-async function launchChrome(profileDir) {
+async function launchChrome(chromePath, profileDir) {
   const chrome = spawn(
-    findChrome(),
+    chromePath,
     ["--headless", "--disable-gpu", "--no-sandbox", "--no-first-run", "--remote-debugging-port=0", `--user-data-dir=${profileDir}`, "about:blank"],
     { stdio: "ignore" },
   );
@@ -680,7 +680,9 @@ async function render(browser, htmlPath, doc) {
 }
 
 async function main() {
-  const workDir = mkdtempSync(join(tmpdir(), "papertrail-samples-"));
+  // Find the browser first, so a missing Chrome never leaves samples/ empty.
+  const chromePath = findChrome();
+  const workDir = mkdtempSync(join(tmpdir(), "duly-samples-"));
   mkdirSync(OUT_DIR, { recursive: true });
 
   // Remove old generated files so a renamed document doesn't leave a stale copy.
@@ -688,7 +690,7 @@ async function main() {
     if (/\.(png|pdf)$/.test(name)) rmSync(join(OUT_DIR, name));
   }
 
-  const browser = await launchChrome(join(workDir, "profile"));
+  const browser = await launchChrome(chromePath, join(workDir, "profile"));
   try {
     await browser.send("Emulation.setDeviceMetricsOverride", {
       width: PAGE_WIDTH,
@@ -723,7 +725,7 @@ function buildReadme() {
 
   return `# Sample documents
 
-Clearly fictional documents for the PaperTrail demo (SPEC.md section 8). Every brand,
+Clearly fictional documents for the Duly demo (SPEC.md section 8). Every brand,
 person, address and number is made up, and every page carries a "SAMPLE" mark.
 
 Documents 1-6 match the seed data in \`lib/storage/seed.ts\` (same issuers, amounts,

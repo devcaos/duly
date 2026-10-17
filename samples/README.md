@@ -1,6 +1,6 @@
 # Sample documents
 
-Clearly fictional documents for the PaperTrail demo (SPEC.md section 8). Every brand,
+Clearly fictional documents for the Duly demo (SPEC.md section 8). Every brand,
 person, address and number is made up, and every page carries a "SAMPLE" mark.
 
 Documents 1-6 match the seed data in `lib/storage/seed.ts` (same issuers, amounts,
