@@ -6,9 +6,11 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "tools": "node scripts/call-tools.mjs"
   },
   "dependencies": {
+    "@google/genai": "^2.30.0",
     "@modelcontextprotocol/server": "^2.3.1",
     "mcp-handler": "^2.3.0",
     "next": "16.4.2",

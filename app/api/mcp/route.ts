@@ -2,9 +2,14 @@ import { createMcpHandler } from "mcp-handler";
 import { z } from "zod";
 import { DEADLINE_KINDS } from "@/lib/types";
 import type { ToolResult } from "@/lib/types";
+import { LlmError } from "@/lib/llm";
+import { ToolError } from "@/lib/tools/resolveDocument";
 import { runListDeadlines } from "@/lib/tools/listDeadlines";
 import { runCheckWarranty } from "@/lib/tools/checkWarranty";
 import { runSearchDocuments } from "@/lib/tools/searchDocuments";
+import { runAddDocument } from "@/lib/tools/addDocument";
+import { runExplainDocument } from "@/lib/tools/explainDocument";
+import { runDraftReply } from "@/lib/tools/draftReply";
 
 const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use the format YYYY-MM-DD");
 
@@ -16,8 +21,42 @@ function toMcpResult<T extends object>(result: ToolResult<T>) {
   };
 }
 
+function toMcpError(message: string) {
+  return { content: [{ type: "text" as const, text: message }], isError: true };
+}
+
+// Runs a tool and turns known errors into a short spoken message instead of a crash.
+async function runTool<T extends object>(run: () => Promise<ToolResult<T>>) {
+  try {
+    return toMcpResult(await run());
+  } catch (error) {
+    if (error instanceof ToolError || error instanceof LlmError) return toMcpError(error.message);
+    console.error("Tool failed:", error);
+    return toMcpError("Something went wrong on my side. Please try again.");
+  }
+}
+
 const handler = createMcpHandler(
   (server) => {
+    server.registerTool(
+      "add_document",
+      {
+        title: "Add document",
+        description:
+          "Save a household document (bill, insurance, warranty, official letter, contract, subscription, school form). Send its text, or a photo/PDF as base64. Extracts type, issuer, amounts, deadlines and action items, stores it, and confirms in one sentence.",
+        inputSchema: z.object({
+          text: z.string().optional().describe("The document's text, if available."),
+          file_base64: z.string().optional().describe("Photo or PDF of the document, base64-encoded (max 3 MB)."),
+          mime_type: z
+            .enum(["image/jpeg", "image/png", "application/pdf"])
+            .optional()
+            .describe("Required when file_base64 is sent."),
+          hint: z.string().optional().describe("Optional hint, e.g. 'this is my car insurance'."),
+        }),
+      },
+      async (input) => runTool(() => runAddDocument(input)),
+    );
+
     server.registerTool(
       "list_deadlines",
       {
@@ -31,7 +70,23 @@ const handler = createMcpHandler(
         }),
         annotations: { readOnlyHint: true },
       },
-      async (input) => toMcpResult(await runListDeadlines(input)),
+      async (input) => runTool(() => runListDeadlines(input)),
+    );
+
+    server.registerTool(
+      "explain_document",
+      {
+        title: "Explain document",
+        description:
+          "Explain a stored document in plain language: what it means, what happens if it's ignored, and the recommended next step. Find it by document_id or by keywords (query). Optionally answer a specific question.",
+        inputSchema: z.object({
+          document_id: z.string().optional().describe("Document id from search_documents or list_deadlines."),
+          query: z.string().optional().describe("Keywords to find the document, e.g. 'parking notice'."),
+          question: z.string().optional().describe("The user's question, e.g. 'What happens if I ignore it?'"),
+        }),
+        annotations: { readOnlyHint: true },
+      },
+      async (input) => runTool(() => runExplainDocument(input)),
     );
 
     server.registerTool(
@@ -45,7 +100,24 @@ const handler = createMcpHandler(
         }),
         annotations: { readOnlyHint: true },
       },
-      async (input) => toMcpResult(await runCheckWarranty(input)),
+      async (input) => runTool(() => runCheckWarranty(input)),
+    );
+
+    server.registerTool(
+      "draft_reply",
+      {
+        title: "Draft reply",
+        description:
+          "Draft a short letter or email replying to a stored document (e.g. ask for a payment extension, cancel a subscription, appeal a fine), using the document's real numbers and dates. Find it by document_id or by keywords (query).",
+        inputSchema: z.object({
+          document_id: z.string().optional().describe("Document id from search_documents or list_deadlines."),
+          query: z.string().optional().describe("Keywords to find the document, e.g. 'electricity bill'."),
+          intent: z.string().min(1).describe("What the reply should achieve, e.g. 'ask for a payment extension'."),
+          tone: z.enum(["polite", "firm"]).optional().describe("Default: polite."),
+        }),
+        annotations: { readOnlyHint: true },
+      },
+      async (input) => runTool(() => runDraftReply(input)),
     );
 
     server.registerTool(
@@ -59,11 +131,11 @@ const handler = createMcpHandler(
         }),
         annotations: { readOnlyHint: true },
       },
-      async (input) => toMcpResult(await runSearchDocuments(input)),
+      async (input) => runTool(() => runSearchDocuments(input)),
     );
   },
   {
-    serverInfo: { name: "papertrail", version: "0.1.0" },
+    serverInfo: { name: "papertrail", version: "0.2.0" },
   },
 );
 
