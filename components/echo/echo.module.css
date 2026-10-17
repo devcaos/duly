@@ -842,6 +842,27 @@
   font-size: 12.5px;
 }
 
+.warrantyRow .bar {
+  margin-top: 16px;
+}
+
+.warrantyRowHead {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.warrantyRowDate {
+  color: var(--muted);
+  font-family: var(--font-mono), monospace;
+  font-size: 12.5px;
+}
+
+.capitalize {
+  text-transform: capitalize;
+}
+
 .claimList {
   list-style: none;
 }

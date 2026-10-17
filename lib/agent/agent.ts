@@ -3,12 +3,14 @@ import type {
   BedrockRuntimeClient,
   Message,
   Tool as BedrockTool,
+  ToolConfiguration,
   ToolInputSchema,
   ToolResultContentBlock,
+  ToolUseBlock,
 } from "@aws-sdk/client-bedrock-runtime";
 import type { Tool as McpTool } from "@modelcontextprotocol/client";
 import { bedrockModelId, createBedrockClient, toLlmError } from "@/lib/llm/bedrock";
-import { todayISO } from "@/lib/dates";
+import { addDays, endOfMonth, todayISO } from "@/lib/dates";
 import { cleanSpoken } from "@/lib/speech";
 import { callMcpTool, listMcpTools } from "./mcpClient";
 import type { ToolCallResult } from "./mcpClient";
@@ -32,18 +34,28 @@ const CARD_FOR_TOOL: Record<string, CardKind> = {
 // Files only arrive through the upload button, so the model never sees these fields.
 const MODEL_HIDDEN_FIELDS = ["file_base64", "mime_type"];
 
+// "Explain the parking fine letter", "what does it mean", "what happens if I ignore it".
+const EXPLAIN_REQUEST = /\b(explain|mean|means|meaning|ignore|what is this|what's this)\b/i;
+
 // Said when the model picks no tool (small talk, unrelated questions).
 const HELP_REPLY = "I can tell you what's due, explain a letter, check a warranty or draft a reply. What do you need?";
 
 function systemPrompt(): string {
   const today = todayISO();
-  const weekday = new Date(`${today}T00:00:00Z`).toLocaleDateString("en-US", { weekday: "long", timeZone: "UTC" });
+  const date = new Date(`${today}T00:00:00Z`);
+  const weekday = date.toLocaleDateString("en-US", { weekday: "long", timeZone: "UTC" });
+  // Sunday ends the week.
+  const endOfWeek = addDays(today, (7 - date.getUTCDay()) % 7);
   return `You route household-paperwork questions from a kitchen Echo Show to the Duly tools.
 Today is ${weekday}, ${today}.
 Rules:
 - Answer every paperwork question by calling exactly one tool. Your own text is never shown or spoken.
 - "What do I need to pay?", "what bills are due?": call list_deadlines with payable: true.
-- To find a document, pass keywords in "query" (e.g. "parking notice"); you don't need search_documents first.
+- Periods for list_deadlines: "this month" = from ${today} to ${endOfMonth(today)}; "this week" = from ${today} to ${endOfWeek}. With no period, leave from and to out (next 30 days).
+- "Explain the ... letter", "what does it mean?", "what happens if I ignore it?": call explain_document with keywords in "query" (or the sender in "issuer"). Never call search_documents for this.
+- "Is my <product> under warranty?": check_warranty with product. "Which warranties are still active?", "my warranties": check_warranty without product.
+- Use search_documents only when the user asks to find or list documents.
+- explain_document, draft_reply and check_warranty find the document themselves from "query" (e.g. "parking notice"); you don't need search_documents first.
 - To change a draft ("make it firmer", "make it more polite"), call draft_reply again with the same document_id and intent from the earlier call and the new tone.
 - Never invent document ids: use one from an earlier tool result, or use "query".`;
 }
@@ -59,33 +71,56 @@ export async function runAgent(mcpUrl: string, message: string, history: ChatTur
     { role: "user", content: [{ text: message }] },
   ];
 
-  bedrock ??= createBedrockClient();
-  let reply: Message | undefined;
-  try {
-    const response = await bedrock.send(
-      new ConverseCommand({
-        modelId: bedrockModelId(),
-        system: [{ text: systemPrompt() }],
-        messages,
-        toolConfig: { tools: mcpTools.map(toBedrockTool) },
-        inferenceConfig: { temperature: 0, maxTokens: 500 },
-      }),
-    );
-    reply = response.output?.message;
-  } catch (error) {
-    throw toLlmError(error);
+  const toolConfig: ToolConfiguration = { tools: mcpTools.map(toBedrockTool) };
+  let toolUses = await pickTools(messages, toolConfig);
+  let forced = false;
+  if (toolUses.length === 0) {
+    // Nova 2 Lite sometimes answers in text even when a tool fits. Ask again, this time
+    // requiring a tool call (toolChoice "any", supported by Nova 2 models).
+    console.info("[chat] the model picked no tool, retrying with toolChoice any");
+    forced = true;
+    toolUses = await pickTools(messages, { ...toolConfig, toolChoice: { any: {} } });
   }
 
   // Run the tools the model picked. No second model call: the tool's sentence is the reply.
-  const toolUses = (reply?.content ?? []).flatMap((block) => (block.toolUse ? [block.toolUse] : []));
   const calls: ToolCallResult[] = [];
   for (const use of toolUses) {
     if (!use.name || !toolNames.has(use.name)) continue;
     calls.push(await safeCallTool(mcpUrl, use.name, (use.input ?? {}) as Record<string, unknown>));
   }
 
+  if (calls.length > 0 && calls.every((call) => call.name === "search_documents")) {
+    const matches = (calls.at(-1)?.structuredContent?.matches as { id: string }[] | undefined) ?? [];
+    // A forced call that found nothing means the question wasn't about paperwork ("hello").
+    if (forced && matches.length === 0) return buildResponse(message, HELP_REPLY, []);
+    // Safety net: "explain the parking fine letter" must end in an explanation, not a search hit.
+    if (matches.length > 0 && EXPLAIN_REQUEST.test(message) && toolNames.has("explain_document")) {
+      calls.push(await safeCallTool(mcpUrl, "explain_document", { document_id: matches[0].id, question: message }));
+    }
+  }
+
   const main = mainCall(calls);
   return buildResponse(message, main ? main.text : HELP_REPLY, calls);
+}
+
+// One Converse call that only chooses tools and their arguments (temperature 0, as the Nova
+// docs recommend for tool calling).
+async function pickTools(messages: Message[], toolConfig: ToolConfiguration): Promise<ToolUseBlock[]> {
+  bedrock ??= createBedrockClient();
+  try {
+    const response = await bedrock.send(
+      new ConverseCommand({
+        modelId: bedrockModelId(),
+        system: [{ text: systemPrompt() }],
+        messages,
+        toolConfig,
+        inferenceConfig: { temperature: 0, maxTokens: 500 },
+      }),
+    );
+    return (response.output?.message?.content ?? []).flatMap((block) => (block.toolUse ? [block.toolUse] : []));
+  } catch (error) {
+    throw toLlmError(error);
+  }
 }
 
 // The page calls list_deadlines, add_document and draft_reply ("Make it firmer") directly.

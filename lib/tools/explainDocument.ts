@@ -32,9 +32,12 @@ Rules:
 export async function runExplainDocument(input: {
   document_id?: string;
   query?: string;
+  issuer?: string;
   question?: string;
 }): Promise<ToolResult<z.infer<typeof explainDocumentOutput>>> {
-  const doc = await resolveDocument(input);
+  // With nothing else to go on, the question itself ("explain the parking fine letter") is the search.
+  const hasReference = input.document_id || input.query || input.issuer;
+  const doc = await resolveDocument(hasReference ? input : { query: input.question });
   const question = input.question ?? "What does this document mean and what should I do?";
 
   const result = await getLlm().generateJson({

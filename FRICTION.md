@@ -68,3 +68,13 @@ One entry per problem with an Amazon/AWS/MCP tool, SDK or doc. Write it when it 
 - **Severity:** major (wasted function time, noisy error logs)
 - **Workaround:** Duly's tools never change, so the handler advertises `capabilities: { tools: { listChanged: false } }`. The SDK then acknowledges the listen request and closes the stream at once (`app/api/mcp/route.ts`). Verified locally: the listen POST went from staying open indefinitely to 10 ms.
 - **Suggestion:** Default `listChanged` to false unless the server actually changes its tool list, or have serverless adapters like `mcp-handler` warn and cap listen streams below the platform timeout.
+
+### Nova 2 Lite answers in text instead of calling an obvious tool
+- **Tool / API / SDK:** Amazon Bedrock Converse API, Amazon Nova 2 Lite (`eu.amazon.nova-2-lite-v1:0`), tool use with `toolChoice` auto, temperature 0
+- **Task I attempted:** Route Echo Show questions ("Is my dishwasher still under warranty?") to the right Duly MCP tool in one Converse call.
+- **Steps I took:** Sent the six Duly tools with their descriptions and a short routing prompt, `temperature: 0` as the Nova docs recommend for tool calling.
+- **Expected:** A `toolUse` block for `check_warranty`, since the question matches its description almost word for word.
+- **What actually happened:** In preview testing, the first two attempts came back as plain text with no tool call; only the third called `check_warranty`. The Nova docs also warn that the model may output text even when a tool choice is set. I couldn't open the AWS docs from the cloud sandbox I was coding in (its network policy blocks docs.aws.amazon.com), so I could only confirm from the indexed text of the official pages that Nova 2 accepts `toolChoice: { any: {} }`.
+- **Severity:** major (the demo answered "I can help with..." to a clear question)
+- **Workaround:** If the first call returns no tool, retry once with `toolChoice: { any: {} }` (forces at least one tool call), and only then fall back to a help sentence (`lib/agent/agent.ts`). Clearer tool descriptions ("use this for ...", "don't search first") also helped.
+- **Suggestion:** Document how often `auto` skips tools on Nova 2 Lite, recommend `any` for router-style prompts, and add a model-specific tool-use example that shows the retry pattern.

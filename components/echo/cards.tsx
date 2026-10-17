@@ -32,19 +32,25 @@ interface DocumentData {
   product?: string;
 }
 
+interface WarrantyInfo {
+  documentId: string;
+  title: string;
+  issuer: string;
+  product?: string;
+  startDate?: string;
+  endDate: string;
+  daysRemaining: number;
+  expired: boolean;
+  status: "active" | "expiring_soon" | "expired";
+  howToClaim: string[];
+}
+
 interface WarrantyData {
-  product: string;
+  product?: string;
   found: boolean;
-  warranty?: {
-    title: string;
-    issuer: string;
-    product?: string;
-    startDate?: string;
-    endDate: string;
-    daysRemaining: number;
-    expired: boolean;
-    howToClaim: string[];
-  };
+  warranty?: WarrantyInfo;
+  // Present when the user asked about all warranties.
+  warranties?: WarrantyInfo[];
 }
 
 export interface DraftData {
@@ -215,9 +221,23 @@ export function DocumentCard({ data }: { data: Record<string, unknown> }) {
   );
 }
 
+// Share of the warranty already used. Without a purchase date, assume a 2-year warranty.
+function usedShare(warranty: WarrantyInfo): number {
+  const total = warranty.startDate ? daysBetween(warranty.startDate, warranty.endDate) : 730;
+  return warranty.expired ? 1 : Math.min(1, Math.max(0, 1 - warranty.daysRemaining / Math.max(total, 1)));
+}
+
+function barTone(warranty: WarrantyInfo): string {
+  return warranty.expired ? styles.barOverdue : warranty.daysRemaining <= 60 ? styles.barUrgent : "";
+}
+
+const STATUS_LABEL = { active: "Active", expiring_soon: "Expiring soon", expired: "Expired" };
+const STATUS_PILL = { active: "", expiring_soon: styles.pillUrgent, expired: styles.pillOverdue };
+
 export function WarrantyCard({ data }: { data: Record<string, unknown> }) {
-  const { warranty, product } = data as unknown as WarrantyData;
+  const { warranty, product, warranties } = data as unknown as WarrantyData;
   const days = useCountUp(Math.max(warranty?.daysRemaining ?? 0, 0), delayFor(0), 900);
+  if (warranties) return <WarrantyList warranties={warranties} />;
   if (!warranty) {
     return (
       <div className={`${styles.card} ${styles.emptyCard} ${styles.enter}`} style={enterStyle(0)}>
@@ -226,10 +246,8 @@ export function WarrantyCard({ data }: { data: Record<string, unknown> }) {
     );
   }
 
-  // Share of the warranty already used. Without a purchase date, assume a 2-year warranty.
-  const total = warranty.startDate ? daysBetween(warranty.startDate, warranty.endDate) : 730;
-  const used = warranty.expired ? 1 : Math.min(1, Math.max(0, 1 - warranty.daysRemaining / Math.max(total, 1)));
-  const tone = warranty.expired ? styles.barOverdue : warranty.daysRemaining <= 60 ? styles.barUrgent : "";
+  const used = usedShare(warranty);
+  const tone = barTone(warranty);
 
   return (
     <div className={styles.stack}>
@@ -251,9 +269,9 @@ export function WarrantyCard({ data }: { data: Record<string, unknown> }) {
           <div className={`${styles.barFill} ${tone}`} style={{ "--fill": used } as CSSProperties} />
         </div>
         <div className={styles.barLabels}>
-          <span>{warranty.startDate ? `Bought ${formatSpokenDate(warranty.startDate)}, ${warranty.startDate.slice(0, 4)}` : ""}</span>
+          <span>{warranty.startDate ? `Bought ${formatSpokenDate(warranty.startDate)}` : ""}</span>
           <span>
-            {warranty.expired ? "Ended" : "Ends"} {formatSpokenDate(warranty.endDate)}, {warranty.endDate.slice(0, 4)}
+            {warranty.expired ? "Ended" : "Ends"} {formatSpokenDate(warranty.endDate)}
           </span>
         </div>
       </div>
@@ -267,6 +285,42 @@ export function WarrantyCard({ data }: { data: Record<string, unknown> }) {
           </ul>
         </div>
       )}
+    </div>
+  );
+}
+
+// Every warranty on file: product, status, end date and how much of it is used.
+function WarrantyList({ warranties }: { warranties: WarrantyInfo[] }) {
+  if (warranties.length === 0) {
+    return (
+      <div className={`${styles.card} ${styles.emptyCard} ${styles.enter}`} style={enterStyle(0)}>
+        No warranties on file yet.
+      </div>
+    );
+  }
+  return (
+    <div className={styles.stack}>
+      {warranties.map((warranty, i) => (
+        <div key={warranty.documentId} className={`${styles.card} ${styles.warrantyRow} ${styles.enter}`} style={enterStyle(i)}>
+          <div className={styles.warrantyRowHead}>
+            <div>
+              <div className={styles.deadlineTitle}>
+                <span className={styles.capitalize}>{warranty.product ?? warranty.title}</span>
+              </div>
+              <div className={styles.deadlineIssuer}>{warranty.issuer}</div>
+            </div>
+            <div className={styles.deadlineMeta}>
+              <span className={`${styles.pill} ${STATUS_PILL[warranty.status]}`}>{STATUS_LABEL[warranty.status]}</span>
+              <span className={styles.warrantyRowDate}>
+                {warranty.expired ? "Ended" : "Ends"} {formatSpokenDate(warranty.endDate)}
+              </span>
+            </div>
+          </div>
+          <div className={styles.bar} role="img" aria-label={`${Math.round(usedShare(warranty) * 100)}% of the warranty used`}>
+            <div className={`${styles.barFill} ${barTone(warranty)}`} style={{ "--fill": usedShare(warranty) } as CSSProperties} />
+          </div>
+        </div>
+      ))}
     </div>
   );
 }

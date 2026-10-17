@@ -81,12 +81,16 @@ async function main() {
   console.log(`Tools: ${tools.map((t) => t.name).join(", ")}`);
 
   await callTool("list_deadlines", {});
+  await callTool("list_deadlines", { payable: true });
   await callTool("check_warranty", { product: "dishwasher" });
+  await callTool("check_warranty", {});
   await callTool("search_documents", { query: "car insurance" });
   await callTool("add_document", { text: SAMPLE_LETTER });
   await callTool("list_deadlines", { kind: "payment_due" });
   await callTool("explain_document", { query: "parking", question: "What happens if I ignore it?" });
+  await callTool("explain_document", { issuer: "City of Maplewood" });
   await callTool("draft_reply", { query: "electricity", intent: "ask for a payment extension of two weeks" });
+  await callTool("draft_reply", { issuer: "Brightwave Energy", intent: "ask for a payment extension", tone: "firm" });
 
   const filePath = process.argv[2];
   if (filePath) {

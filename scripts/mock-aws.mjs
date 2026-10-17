@@ -24,6 +24,10 @@ function addDays(iso, days) {
   date.setUTCDate(date.getUTCDate() + days);
   return date.toISOString().slice(0, 10);
 }
+function endOfMonth(iso) {
+  const date = new Date(`${iso}T00:00:00Z`);
+  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + 1, 0)).toISOString().slice(0, 10);
+}
 const spokenDate = (iso) =>
   new Date(`${iso}T00:00:00Z`).toLocaleDateString("en-US", { month: "long", day: "numeric", timeZone: "UTC" });
 const money = (amount) => (amount === undefined ? "" : `$${Number(amount).toFixed(2)}`);
@@ -38,7 +42,7 @@ function converse(body) {
     // Duly's document tools (lib/llm/bedrock.ts) force one tool whose input is the answer.
     return toolUseReply(forced, structuredAnswer(body));
   }
-  return agentTurn(body.messages ?? []);
+  return agentTurn(body.messages ?? [], Boolean(body.toolConfig?.toolChoice?.any));
 }
 
 function toolUseReply(name, input) {
@@ -67,7 +71,7 @@ const systemText = (body) => (body.system ?? []).map((block) => block.text ?? ""
 
 function documentFromPrompt(prompt, endMarker) {
   const start = prompt.indexOf("Document:\n");
-  const end = prompt.indexOf(endMarker, start);
+  const end = start + prompt.slice(start).search(endMarker);
   try {
     return JSON.parse(prompt.slice(start + "Document:\n".length, end));
   } catch {
@@ -118,16 +122,28 @@ function structuredAnswer(body) {
   }
 
   if (system.includes("You write short replies")) {
-    const doc = documentFromPrompt(prompt, "\n\nTone:");
+    // Body only: the app adds "Dear ...," and "Sincerely," itself.
+    const doc = documentFromPrompt(prompt, /\n\n(Reference numbers|This document has no reference)/);
     const firm = /Write a firm reply/.test(prompt);
     const goal = (prompt.match(/Goal: (.*)$/m)?.[1] ?? "ask for more time").trim();
+    const ref = prompt.match(/^- ([A-Za-z ]+): (\S+)$/m);
+    const refText = ref ? ` (${ref[1].toLowerCase()} ${ref[2]})` : "";
     const next = nextDeadline(doc);
     const amount = next?.amount ?? doc.amount;
-    const ref = `${doc.title}${amount !== undefined ? ` (${money(amount)}` : ""}${next ? `, due ${spokenDate(next.date)})` : amount !== undefined ? ")" : ""}`;
-    const replyBy = prompt.match(/written answer by ([A-Z][a-z]+ \d{1,2})/)?.[1] ?? "next week";
+    const facts = amount !== undefined ? ` The amount is ${money(amount)}${next ? `, due ${next.date}` : ""}.` : "";
+    const replyBy = prompt.match(/by ([A-Z][a-z]+ \d{1,2}, \d{4})/)?.[1] ?? "next week";
+    // Test hooks: "[bad-draft]" in the goal makes the first draft break the rules (invented
+    // figure, wrong reference label); "[bad-draft-twice]" breaks the retry too.
+    const isRetry = prompt.includes("Your previous draft had these problems");
+    if (/\[bad-draft-twice\]/.test(goal) || (/\[bad-draft\]/.test(goal) && !isRetry)) {
+      return {
+        subject: `Bill number ${ref?.[2] ?? "X-1"}`,
+        body: `I dispute this charge. Please give me 30 more days for bill number ${ref?.[2] ?? "X-1"}.`,
+      };
+    }
     const body = firm
-      ? `Dear ${doc.issuer},\n\nI am requesting to ${goal} for ${ref}. I need a payment date 14 days after the current due date, with no late fee while this request is open.\n\nPlease confirm in writing by ${replyBy}.\n\nRegards,\n[Your name]\n[Your address]`
-      : `Dear ${doc.issuer} team,\n\nI hope you are well. I am writing about ${ref}. I would like to ${goal}, as this month has been tighter than usual. I would be very grateful for a short extension of 14 days.\n\nThank you for your understanding.\n\nKind regards,\n[Your name]\n[Your phone]`;
+      ? `I am requesting to ${goal} regarding ${doc.title}${refText}.${facts}\n\nPlease review the account and send me an itemized breakdown of the amount.\n\nPlease confirm in writing by ${replyBy}.`
+      : `I am writing about ${doc.title}${refText}.${facts}\n\nI would like to ${goal}. I would be grateful for any options you can offer.\n\nThank you for your understanding.`;
     return { subject: `${firm ? "Formal request" : "Request"}: ${goal} – ${doc.title}`, body };
   }
 
@@ -136,10 +152,16 @@ function structuredAnswer(body) {
 
 // The demo web's agent: pick one tool and its arguments from keywords (the app speaks the
 // tool's own sentence, so the model is never asked for a final answer).
-function agentTurn(messages) {
+function agentTurn(messages, mustUseTool) {
   const last = messages.at(-1);
   const said = (last?.content ?? []).map((block) => block.text ?? "").join(" ");
   const q = said.toLowerCase();
+
+  // Test hook: "[text-first]" answers in text unless a tool call is required (toolChoice any),
+  // like Nova 2 Lite sometimes does.
+  if (q.includes("[text-first]") && !mustUseTool) return textReply("Sure, let me check that for you.");
+  // Test hook: "[search-only]" calls search_documents, like Nova did for "explain the letter".
+  if (q.includes("[search-only]")) return toolUseReply("search_documents", { query: guessQuery(q, "parking") });
 
   if (/firm|stronger|polite|softer/.test(q)) {
     const previous = [...messages]
@@ -151,8 +173,12 @@ function agentTurn(messages) {
     }
   }
   if (/warrant/.test(q)) {
+    if (/which|all|warranties|active/.test(q)) return toolUseReply("check_warranty", {});
     const product = q.match(/my ([a-z]+)/)?.[1] ?? "dishwasher";
     return toolUseReply("check_warranty", { product });
+  }
+  if (/mean|explain|ignore|what is this|what's this/.test(q)) {
+    return toolUseReply("explain_document", { query: guessQuery(q, "parking notice"), question: said });
   }
   if (/reply|write|letter|email|extension|draft|cancel/.test(q)) {
     return toolUseReply("draft_reply", {
@@ -161,15 +187,16 @@ function agentTurn(messages) {
       tone: /firm/.test(q) ? "firm" : "polite",
     });
   }
-  if (/mean|explain|ignore|what is this|what's this/.test(q)) {
-    return toolUseReply("explain_document", { query: guessQuery(q, "parking notice"), question: said });
-  }
   if (/insurance|renew/.test(q)) {
     return toolUseReply("explain_document", { query: guessQuery(q, "car insurance"), question: said });
   }
   if (/pay|due|deadline|coming up|this month|this week|owe|bills?/.test(q)) {
-    return toolUseReply("list_deadlines", /pay|owe|bills?/.test(q) ? { payable: true } : {});
+    const input = /pay|owe|bills?/.test(q) ? { payable: true } : {};
+    if (q.includes("this month")) Object.assign(input, { from: today(), to: endOfMonth(today()) });
+    return toolUseReply("list_deadlines", input);
   }
+  // A required tool call with nothing to go on: search with the words said.
+  if (mustUseTool) return toolUseReply("search_documents", { query: said.slice(0, 100) || "document" });
   return textReply("I can tell you what's due, explain a letter, check a warranty or draft a reply. What do you need?");
 }
 
