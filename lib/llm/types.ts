@@ -24,3 +24,15 @@ export interface LlmAdapter {
 
 // Error with a short message that is safe to speak back to the user.
 export class LlmError extends Error {}
+
+// The provider can't answer right now (throttling, quota, access denied).
+// Only this error makes the fallback provider retry the request.
+export class LlmUnavailableError extends LlmError {
+  constructor(
+    message: string,
+    readonly provider: string,
+    readonly code: string,
+  ) {
+    super(message);
+  }
+}

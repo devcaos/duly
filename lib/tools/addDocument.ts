@@ -51,12 +51,13 @@ export async function runAddDocument(input: {
   if (!input.text && !input.file_base64) {
     throw new ToolError("Please send the document as text or as a file.");
   }
+  let fileBytes: Buffer | undefined;
   if (input.file_base64) {
     if (!input.mime_type) {
       throw new ToolError("Please say the file type: image/jpeg, image/png or application/pdf.");
     }
     // Strict base64 + size + magic bytes, before spending an LLM call.
-    decodeFile(input.file_base64, input.mime_type);
+    fileBytes = decodeFile(input.file_base64, input.mime_type);
   }
 
   const today = todayISO();
@@ -75,14 +76,20 @@ export async function runAddDocument(input: {
     schema: extractionSchema,
   });
 
+  // The original file is stored only after a successful extraction, so failures leave no orphan files.
+  const storage = getStorage();
+  const id = `doc-${crypto.randomUUID().slice(0, 8)}`;
+  const fileKey = fileBytes ? await storage.saveFile(HOUSEHOLD_ID, id, fileBytes, input.mime_type!) : undefined;
+
   const document: Document = {
     ...extracted,
-    id: `doc-${crypto.randomUUID().slice(0, 8)}`,
+    id,
     householdId: HOUSEHOLD_ID,
     rawText: input.text ?? extracted.rawText,
+    fileKey,
     createdAt: new Date().toISOString(),
   };
-  await getStorage().saveDocument(document);
+  await storage.saveDocument(document);
 
   return { text: `${savedSentence(document)} Duly noted.`, structuredContent: { document } };
 }
