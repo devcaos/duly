@@ -1,5 +1,6 @@
 import { Client, ProtocolError, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import type { Tool } from "@modelcontextprotocol/client";
+import { INTERNAL_TOKEN_HEADER, internalToken } from "@/lib/rateLimit";
 
 // The demo web talks to Duly exactly like Alexa+ would: as an MCP client of our own
 // /api/mcp endpoint, over Streamable HTTP, with the official MCP TypeScript SDK.
@@ -19,15 +20,31 @@ interface Connection {
 }
 
 // One connection per server instance, reused across requests. The Duly server is
-// stateless, so a connection never goes stale; connecting again costs 4 HTTP requests.
+// stateless, so a connection never goes stale.
 let connection: Promise<Connection> | undefined;
 let connectedUrl: string | undefined;
 
 async function connect(url: string): Promise<Connection> {
-  const client = new Client({ name: "duly-echo-web", version: "1.0.0" });
-  await client.connect(new StreamableHTTPClientTransport(new URL(url)));
+  // "auto" speaks the 2026-07-28 protocol (one server/discover request instead of the
+  // initialize handshake) and falls back to the 2025 handshake if the server is older.
+  const client = new Client({ name: "duly-echo-web", version: "1.0.0" }, { versionNegotiation: { mode: "auto" } });
+  // The internal token lets /api/mcp skip its per-IP limit: /api/chat limits each user itself.
+  const token = canSendToken(url) ? internalToken() : undefined;
+  const transport = new StreamableHTTPClientTransport(new URL(url), {
+    requestInit: token ? { headers: { [INTERNAL_TOKEN_HEADER]: token } } : undefined,
+  });
+  await client.connect(transport);
   const { tools } = await client.listTools();
   return { client, tools };
+}
+
+// The default MCP URL comes from the request's Host header. On Vercel (which only routes our
+// own domains here), on localhost or with an explicit MCP_URL that's safe; anywhere else a
+// forged Host header could send the secret to another server, so it is not attached.
+function canSendToken(url: string): boolean {
+  if (process.env.MCP_URL || process.env.VERCEL === "1") return true;
+  const { hostname } = new URL(url);
+  return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "[::1]";
 }
 
 function getConnection(url: string): Promise<Connection> {

@@ -7,9 +7,10 @@ import { allowRequest, getClientIp, llmLimitPerMinute, requestLimitPerMinute } f
 
 // Backend of the Echo Show simulator (SPEC.md section 7). Two kinds of request:
 // - { message, history }: the Bedrock agent answers, calling Duly's MCP tools.
-// - { call: { name, arguments } }: the page calls list_deadlines or add_document directly.
+// - { call: { name, arguments } }: the page calls list_deadlines, add_document or
+//   draft_reply ("Make it firmer") directly.
 
-// A question can take a few model turns plus LLM tools (explain, draft).
+// A question is one model call plus, for explain and draft, an LLM tool.
 export const maxDuration = 60;
 
 // A 3 MB file is about 4 MB as base64, plus a little JSON around it.
@@ -24,6 +25,7 @@ const turnSchema = z.object({
         name: z.string().max(64),
         input: z.record(z.string(), z.unknown()),
         result: z.string().max(2000),
+        documentId: z.string().max(100).optional(),
       }),
     )
     .max(4),
@@ -41,6 +43,13 @@ const bodySchema = z.union([
     }),
   }),
 ]);
+
+// What the user "said", for the screen and the conversation history.
+const DIRECT_USER_TEXT: Record<(typeof DIRECT_TOOLS)[number], string> = {
+  list_deadlines: "",
+  add_document: "Save this document.",
+  draft_reply: "Make it firmer.",
+};
 
 // Our own MCP endpoint. MCP_URL overrides it (e.g. to test the deployed server).
 function mcpUrl(req: Request): string {
@@ -65,8 +74,10 @@ export async function POST(req: Request): Promise<Response> {
   if (!parsed.success) return errorResponse("Invalid request.", 400);
   const body = parsed.data;
 
-  // Questions and uploads use the LLM; the home screen's deadline list doesn't.
-  const usesLlm = "message" in body || body.call.name === "add_document";
+  // Questions, uploads and drafts use the LLM; the home screen's deadline list doesn't.
+  // These limits use the visitor's own IP; the calls to /api/mcp below carry the internal
+  // token so they don't count against the server's shared IP there.
+  const usesLlm = "message" in body || body.call.name !== "list_deadlines";
   const allowed = usesLlm
     ? allowRequest("chat", getClientIp(req), llmLimitPerMinute())
     : allowRequest("chat-read", getClientIp(req), requestLimitPerMinute());
@@ -76,7 +87,7 @@ export async function POST(req: Request): Promise<Response> {
     if ("message" in body) {
       return Response.json(await runAgent(mcpUrl(req), body.message, body.history));
     }
-    const userText = body.call.name === "add_document" ? "Save this document." : "";
+    const userText = DIRECT_USER_TEXT[body.call.name];
     return Response.json(await runDirectTool(mcpUrl(req), body.call.name, body.call.arguments, userText));
   } catch (error) {
     if (error instanceof LlmError) return errorResponse(error.message, 502);

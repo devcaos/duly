@@ -22,7 +22,9 @@ Open the app's home page (`/`, or http://localhost:3000 with `npm run dev`). It 
 - The reply is spoken with **Amazon Polly** (neural voice). If Polly is unavailable, the browser's own voice reads it.
 - The screen shows result cards: deadlines, the saved document, the warranty, or a letter draft with **Copy** and **Make it firmer**.
 
-How it works: [`app/api/chat/route.ts`](app/api/chat/route.ts) runs an agent loop with Amazon Bedrock (Converse API with tool use, model `BEDROCK_MODEL_ID`). The agent is an **MCP client of Duly's own `/api/mcp`** ([`lib/agent/mcpClient.ts`](lib/agent/mcpClient.ts), official MCP TypeScript SDK, Streamable HTTP): it lists the tools over MCP, hands them to the model, and calls them over MCP, the same way Alexa+ would. The home screen's "Coming up" list and uploads call `list_deadlines` and `add_document` directly, without the model (a model can't copy a whole file into a tool call). Replies go through [`app/api/speak/route.ts`](app/api/speak/route.ts) (Polly). Set `MCP_URL` to point the agent at another Duly server.
+How it works: [`app/api/chat/route.ts`](app/api/chat/route.ts) asks Amazon Bedrock (Converse API with tool use, model `BEDROCK_MODEL_ID`) which Duly tool to call and with which arguments. The app is an **MCP client of Duly's own `/api/mcp`** ([`lib/agent/mcpClient.ts`](lib/agent/mcpClient.ts), official MCP TypeScript SDK, Streamable HTTP): it lists the tools over MCP, hands them to the model, and calls the chosen tool over MCP, the same way Alexa+ would. What Alexa says is the tool's own spoken sentence; the model never writes the reply, so it can't leak ids or JSON or claim actions it didn't take. A safety filter ([`lib/speech.ts`](lib/speech.ts)) still removes ids and JSON and turns ISO dates into spoken dates. The home screen's "Coming up" list, uploads and the **Make it firmer** button call `list_deadlines`, `add_document` and `draft_reply` directly, without the model (a model can't copy a whole file into a tool call). Replies go through [`app/api/speak/route.ts`](app/api/speak/route.ts) (Polly). Set `MCP_URL` to point the app at another Duly server.
+
+Rate limits: `/api/chat` and `/api/speak` limit each visitor by IP. Set `DULY_INTERNAL_TOKEN` (see `.env.example`) so the app's own calls to `/api/mcp` skip the per-IP limit there; without it, every visitor shares the server's IP bucket on `/api/mcp`.
 
 ### MCP Inspector
 
@@ -98,7 +100,7 @@ Three actions are only needed by `npm run setup:aws`: **`dynamodb:CreateTable`**
 [`scripts/mock-aws.mjs`](scripts/mock-aws.mjs) is a local stand-in for Bedrock and Polly with canned, keyword-based answers. The app code doesn't change: the AWS SDK sends its requests to the mock because of the `AWS_ENDPOINT_URL_*` variables.
 
 1. In one terminal: `npm run mock:aws`.
-2. In `.env.local`, set `LLM_PROVIDER=bedrock`, `AWS_ACCESS_KEY_ID=mock`, `AWS_SECRET_ACCESS_KEY=mock`, `AWS_ENDPOINT_URL_BEDROCK_RUNTIME=http://localhost:4010` and `AWS_ENDPOINT_URL_POLLY=http://localhost:4011` (and `STORAGE=memory`).
+2. In `.env.local`, set `LLM_PROVIDER=bedrock`, `AWS_ACCESS_KEY_ID=mock`, `AWS_SECRET_ACCESS_KEY=mock`, `AWS_ENDPOINT_URL_BEDROCK_RUNTIME=http://localhost:4010` and `AWS_ENDPOINT_URL_POLLY=http://localhost:4010` (and `STORAGE=memory`).
 3. In another terminal: `npm run dev`, then open http://localhost:3000.
 
 The mock Polly plays a short chime instead of speech. Start it with `MOCK_POLLY=fail npm run mock:aws` to test the browser voice fallback. Remove the `AWS_ENDPOINT_URL_*` lines to use real AWS.

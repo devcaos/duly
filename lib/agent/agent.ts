@@ -1,7 +1,6 @@
 import { ConverseCommand } from "@aws-sdk/client-bedrock-runtime";
 import type {
   BedrockRuntimeClient,
-  ContentBlock,
   Message,
   Tool as BedrockTool,
   ToolInputSchema,
@@ -10,16 +9,16 @@ import type {
 import type { Tool as McpTool } from "@modelcontextprotocol/client";
 import { bedrockModelId, createBedrockClient, toLlmError } from "@/lib/llm/bedrock";
 import { todayISO } from "@/lib/dates";
-import { limitSentences } from "@/lib/speech";
+import { cleanSpoken } from "@/lib/speech";
 import { callMcpTool, listMcpTools } from "./mcpClient";
 import type { ToolCallResult } from "./mcpClient";
 import type { Card, CardKind, ChatResponse, ChatTurn } from "./types";
 
-// Agent loop for the Echo Show simulator: Bedrock Converse with tool use, where every
-// tool is one of Duly's MCP tools, called through the MCP client (see mcpClient.ts).
-
-// Model turns per question: enough for "search, then explain", and stops runaway loops.
-const MAX_STEPS = 4;
+// Agent for the Echo Show simulator: Bedrock Converse with tool use, where every tool is one
+// of Duly's MCP tools, called through the MCP client (see mcpClient.ts).
+// The model only picks the tool and its arguments, in a single call. What Alexa says is the
+// tool's own spoken sentence (its first text block): the model never writes the reply, so it
+// can't leak ids or JSON, repeat itself or claim actions it didn't take.
 
 const CARD_FOR_TOOL: Record<string, CardKind> = {
   list_deadlines: "deadlines",
@@ -33,19 +32,20 @@ const CARD_FOR_TOOL: Record<string, CardKind> = {
 // Files only arrive through the upload button, so the model never sees these fields.
 const MODEL_HIDDEN_FIELDS = ["file_base64", "mime_type"];
 
-const FALLBACK_REPLY = "Sorry, I couldn't find an answer to that. Try asking about your bills, warranties or letters.";
+// Said when the model picks no tool (small talk, unrelated questions).
+const HELP_REPLY = "I can tell you what's due, explain a letter, check a warranty or draft a reply. What do you need?";
 
 function systemPrompt(): string {
   const today = todayISO();
   const weekday = new Date(`${today}T00:00:00Z`).toLocaleDateString("en-US", { weekday: "long", timeZone: "UTC" });
-  return `You are Alexa+ on a kitchen Echo Show. You answer questions about the household's paperwork (bills, insurance, warranties, official letters, subscriptions, school forms) using the Duly tools.
+  return `You route household-paperwork questions from a kitchen Echo Show to the Duly tools.
 Today is ${weekday}, ${today}.
 Rules:
-- Always answer from the tools. Never invent documents, amounts or dates.
+- Answer every paperwork question by calling exactly one tool. Your own text is never shown or spoken.
+- "What do I need to pay?", "what bills are due?": call list_deadlines with payable: true.
 - To find a document, pass keywords in "query" (e.g. "parking notice"); you don't need search_documents first.
-- Your reply is spoken aloud: 1 to 3 short sentences, no lists, no markdown. The screen already shows lists, documents and letters, so don't read them out.
-- Duly explains documents but never gives legal or financial advice.
-- To change a draft ("make it firmer"), call draft_reply again with the same document and intent and the new tone.`;
+- To change a draft ("make it firmer", "make it more polite"), call draft_reply again with the same document_id and intent from the earlier call and the new tone.
+- Never invent document ids: use one from an earlier tool result, or use "query".`;
 }
 
 let bedrock: BedrockRuntimeClient | undefined;
@@ -53,63 +53,42 @@ let bedrock: BedrockRuntimeClient | undefined;
 export async function runAgent(mcpUrl: string, message: string, history: ChatTurn[]): Promise<ChatResponse> {
   const mcpTools = await listMcpTools(mcpUrl);
   const toolNames = new Set(mcpTools.map((tool) => tool.name));
-  const toolConfig = { tools: mcpTools.map(toBedrockTool) };
 
   const messages: Message[] = [
     ...history.flatMap((turn, i) => turnToMessages(turn, i, toolNames)),
     { role: "user", content: [{ text: message }] },
   ];
-  const calls: ToolCallResult[] = [];
-  let finalText = "";
 
   bedrock ??= createBedrockClient();
-  for (let step = 0; step < MAX_STEPS; step++) {
-    let reply: Message | undefined;
-    try {
-      const response = await bedrock.send(
-        new ConverseCommand({
-          modelId: bedrockModelId(),
-          system: [{ text: systemPrompt() }],
-          messages,
-          toolConfig,
-          inferenceConfig: { temperature: 0.2, maxTokens: 600 },
-        }),
-      );
-      reply = response.output?.message;
-    } catch (error) {
-      throw toLlmError(error);
-    }
-    if (!reply) break;
-    messages.push(reply);
-
-    const toolUses = (reply.content ?? []).flatMap((block) => (block.toolUse ? [block.toolUse] : []));
-    if (toolUses.length === 0) {
-      finalText = textOf(reply.content);
-      break;
-    }
-
-    // Run every tool the model asked for, then hand the results back to it.
-    const results: ContentBlock[] = [];
-    for (const use of toolUses) {
-      const result = await safeCallTool(mcpUrl, use.name ?? "", (use.input ?? {}) as Record<string, unknown>);
-      calls.push(result);
-      results.push({
-        toolResult: {
-          toolUseId: use.toolUseId,
-          status: result.isError ? "error" : "success",
-          content: toolResultContent(result),
-        },
-      });
-    }
-    messages.push({ role: "user", content: results });
+  let reply: Message | undefined;
+  try {
+    const response = await bedrock.send(
+      new ConverseCommand({
+        modelId: bedrockModelId(),
+        system: [{ text: systemPrompt() }],
+        messages,
+        toolConfig: { tools: mcpTools.map(toBedrockTool) },
+        inferenceConfig: { temperature: 0, maxTokens: 500 },
+      }),
+    );
+    reply = response.output?.message;
+  } catch (error) {
+    throw toLlmError(error);
   }
 
-  // If the model said nothing (or ran out of steps), speak the last tool's sentence.
-  const spoken = finalText || calls.at(-1)?.text || FALLBACK_REPLY;
-  return buildResponse(message, limitSentences(spoken, 3), calls);
+  // Run the tools the model picked. No second model call: the tool's sentence is the reply.
+  const toolUses = (reply?.content ?? []).flatMap((block) => (block.toolUse ? [block.toolUse] : []));
+  const calls: ToolCallResult[] = [];
+  for (const use of toolUses) {
+    if (!use.name || !toolNames.has(use.name)) continue;
+    calls.push(await safeCallTool(mcpUrl, use.name, (use.input ?? {}) as Record<string, unknown>));
+  }
+
+  const main = mainCall(calls);
+  return buildResponse(message, main ? main.text : HELP_REPLY, calls);
 }
 
-// The page calls list_deadlines and add_document directly (no model involved).
+// The page calls list_deadlines, add_document and draft_reply ("Make it firmer") directly.
 export async function runDirectTool(
   mcpUrl: string,
   name: string,
@@ -120,12 +99,23 @@ export async function runDirectTool(
   return buildResponse(userText, result.text, [result]);
 }
 
-function buildResponse(userText: string, reply: string, calls: ToolCallResult[]): ChatResponse {
+// The call whose sentence is spoken: the last one that isn't a plain search, if any.
+function mainCall(calls: ToolCallResult[]): ToolCallResult | undefined {
+  return calls.findLast((call) => call.name !== "search_documents") ?? calls.at(-1);
+}
+
+function buildResponse(userText: string, spoken: string, calls: ToolCallResult[]): ChatResponse {
+  const reply = cleanSpoken(spoken) || HELP_REPLY;
   const turn: ChatTurn = {
     user: userText,
     assistant: reply,
-    // The base64 file is never sent back to the page.
-    tools: calls.map((call) => ({ name: call.name, input: withoutFile(call.input), result: historyResult(call) })),
+    tools: calls.map((call) => ({
+      name: call.name,
+      // The base64 file is never sent back to the page.
+      input: withoutFile(call.input),
+      result: cleanSpoken(call.text),
+      documentId: documentIdOf(call),
+    })),
   };
   return { reply, cards: cardsFor(calls), turn };
 }
@@ -168,16 +158,9 @@ function toBedrockTool(tool: McpTool): BedrockTool {
   };
 }
 
-function toolResultContent(result: ToolCallResult): ToolResultContentBlock[] {
-  const content: ToolResultContentBlock[] = [{ text: result.text }];
-  if (result.structuredContent) {
-    content.push({ json: result.structuredContent } as ToolResultContentBlock);
-  }
-  return content;
-}
-
-// Rebuilds an earlier exchange as real Converse messages (tool calls included),
-// so the model knows which document and intent "make it firmer" refers to.
+// Rebuilds an earlier exchange as real Converse messages (tool calls included), so the model
+// knows which document and intent "make it firmer" refers to. The document id travels as a
+// JSON block, never inside text.
 function turnToMessages(turn: ChatTurn, index: number, toolNames: Set<string>): Message[] {
   const tools = turn.tools.filter((tool) => toolNames.has(tool.name));
   const messages: Message[] = [{ role: "user", content: [{ text: turn.user || "(uploaded a document)" }] }];
@@ -189,28 +172,20 @@ function turnToMessages(turn: ChatTurn, index: number, toolNames: Set<string>): 
     } as Message);
     messages.push({
       role: "user",
-      content: tools.map((tool, j) => ({ toolResult: { toolUseId: id(j), content: [{ text: tool.result }] } })),
+      content: tools.map((tool, j) => {
+        const content: ToolResultContentBlock[] = [{ text: tool.result }];
+        if (tool.documentId) content.push({ json: { document_id: tool.documentId } } as ToolResultContentBlock);
+        return { toolResult: { toolUseId: id(j), content } };
+      }),
     });
   }
   messages.push({ role: "assistant", content: [{ text: turn.assistant || "OK." }] });
   return messages;
 }
 
-// Nova models sometimes wrap their reasoning in <thinking> tags: never speak it.
-function textOf(content: ContentBlock[] | undefined): string {
-  return (content ?? [])
-    .map((block) => block.text ?? "")
-    .join(" ")
-    .replace(/<thinking>[\s\S]*?<\/thinking>/g, "")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-// The spoken sentence, plus the document id when there is one, so a follow-up like
-// "what does this letter mean?" right after an upload can find the document.
-function historyResult(call: ToolCallResult): string {
+function documentIdOf(call: ToolCallResult): string | undefined {
   const document = call.structuredContent?.document as { id?: unknown } | undefined;
-  return typeof document?.id === "string" ? `${call.text} (document_id: ${document.id})` : call.text;
+  return typeof document?.id === "string" ? document.id : undefined;
 }
 
 function withoutFile(input: Record<string, unknown>): Record<string, unknown> {

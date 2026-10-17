@@ -1,3 +1,5 @@
+import { timingSafeEqual } from "node:crypto";
+
 // Basic per-IP rate limiting (SPEC.md section 4: demo mitigations).
 // The counters live in memory, so they are per server instance: each Vercel
 // instance has its own counters and they reset when the instance restarts.
@@ -53,4 +55,26 @@ function removeExpired(now: number) {
   for (const [key, times] of hits) {
     if (times.every((t) => now - t >= WINDOW_MS)) hits.delete(key);
   }
+}
+
+// Header that the demo web's /api/chat sends on its own calls to /api/mcp. /api/chat already
+// rate-limits each user by their real IP, so those internal calls skip the per-IP limits here
+// (otherwise every visitor would share the server's own IP bucket).
+export const INTERNAL_TOKEN_HEADER = "x-duly-internal-token";
+const MIN_TOKEN_CHARS = 16;
+
+export function internalToken(): string | undefined {
+  const token = process.env.DULY_INTERNAL_TOKEN;
+  return token && token.length >= MIN_TOKEN_CHARS ? token : undefined;
+}
+
+// True only when DULY_INTERNAL_TOKEN is set and the request carries exactly that value.
+export function isInternalRequest(req?: Request): boolean {
+  const expected = internalToken();
+  const received = req?.headers.get(INTERNAL_TOKEN_HEADER);
+  if (!expected || !received) return false;
+  const a = Buffer.from(received);
+  const b = Buffer.from(expected);
+  // Constant-time comparison, so the token can't be guessed one character at a time.
+  return a.length === b.length && timingSafeEqual(a, b);
 }

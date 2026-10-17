@@ -7,17 +7,15 @@
 //   then start the app with these variables (e.g. in .env.local) and `npm run dev`:
 //     LLM_PROVIDER=bedrock
 //     AWS_ENDPOINT_URL_BEDROCK_RUNTIME=http://localhost:4010
-//     AWS_ENDPOINT_URL_POLLY=http://localhost:4011
+//     AWS_ENDPOINT_URL_POLLY=http://localhost:4010
 //     AWS_ACCESS_KEY_ID=mock
 //     AWS_SECRET_ACCESS_KEY=mock
 // MOCK_POLLY=fail makes Polly answer 503, to test the browser voice fallback.
 
-import { createServer } from "node:http";
-import { createServer as createHttp2Server } from "node:http2";
+import { createServer } from "node:http2";
 
-// The Bedrock Runtime client speaks HTTP/2 (it supports bidirectional streams), Polly HTTP/1.1.
-const BEDROCK_PORT = 4010;
-const POLLY_PORT = 4011;
+// The Bedrock Runtime and Polly clients both use HTTP/2 (plaintext h2c here), so one port serves both.
+const PORT = 4010;
 const LATENCY_MS = 500; // feels like a real model call
 
 const today = () => new Date().toISOString().slice(0, 10);
@@ -120,14 +118,15 @@ function structuredAnswer(body) {
   }
 
   if (system.includes("You write short replies")) {
-    const doc = documentFromPrompt(prompt, "\n\nWrite a ");
+    const doc = documentFromPrompt(prompt, "\n\nTone:");
     const firm = /Write a firm reply/.test(prompt);
     const goal = (prompt.match(/Goal: (.*)$/m)?.[1] ?? "ask for more time").trim();
     const next = nextDeadline(doc);
     const amount = next?.amount ?? doc.amount;
     const ref = `${doc.title}${amount !== undefined ? ` (${money(amount)}` : ""}${next ? `, due ${spokenDate(next.date)})` : amount !== undefined ? ")" : ""}`;
+    const replyBy = prompt.match(/written answer by ([A-Z][a-z]+ \d{1,2})/)?.[1] ?? "next week";
     const body = firm
-      ? `Dear ${doc.issuer},\n\nI am writing regarding ${ref}. I need to ${goal}. I expect a written confirmation within 7 days, and I ask that no late fees or penalties are applied while this request is open.\n\nPlease treat this as a formal request.\n\nRegards,\n[Your name]\n[Your address]`
+      ? `Dear ${doc.issuer},\n\nI am requesting to ${goal} for ${ref}. I need a payment date 14 days after the current due date, with no late fee while this request is open.\n\nPlease confirm in writing by ${replyBy}.\n\nRegards,\n[Your name]\n[Your address]`
       : `Dear ${doc.issuer} team,\n\nI hope you are well. I am writing about ${ref}. I would like to ${goal}, as this month has been tighter than usual. I would be very grateful for a short extension of 14 days.\n\nThank you for your understanding.\n\nKind regards,\n[Your name]\n[Your phone]`;
     return { subject: `${firm ? "Formal request" : "Request"}: ${goal} – ${doc.title}`, body };
   }
@@ -135,15 +134,10 @@ function structuredAnswer(body) {
   return {};
 }
 
-// The demo web's agent loop: pick a tool from keywords, then speak the tool's sentence.
+// The demo web's agent: pick one tool and its arguments from keywords (the app speaks the
+// tool's own sentence, so the model is never asked for a final answer).
 function agentTurn(messages) {
   const last = messages.at(-1);
-  const toolResult = last?.content?.find((block) => block.toolResult)?.toolResult;
-  if (toolResult) {
-    const text = toolResult.content?.find((block) => block.text)?.text ?? "Done.";
-    return textReply(text);
-  }
-
   const said = (last?.content ?? []).map((block) => block.text ?? "").join(" ");
   const q = said.toLowerCase();
 
@@ -174,7 +168,7 @@ function agentTurn(messages) {
     return toolUseReply("explain_document", { query: guessQuery(q, "car insurance"), question: said });
   }
   if (/pay|due|deadline|coming up|this month|this week|owe|bills?/.test(q)) {
-    return toolUseReply("list_deadlines", /pay|owe/.test(q) ? { kind: "payment_due" } : {});
+    return toolUseReply("list_deadlines", /pay|owe|bills?/.test(q) ? { payable: true } : {});
   }
   return textReply("I can tell you what's due, explain a letter, check a warranty or draft a reply. What do you need?");
 }
@@ -256,9 +250,6 @@ function handler(req, res) {
   });
 }
 
-createHttp2Server(handler).listen(BEDROCK_PORT, () => {
-  console.log(`Mock Bedrock (HTTP/2) listening on http://localhost:${BEDROCK_PORT}`);
-});
-createServer(handler).listen(POLLY_PORT, () => {
-  console.log(`Mock Polly listening on http://localhost:${POLLY_PORT}`);
+createServer(handler).listen(PORT, () => {
+  console.log(`Mock Bedrock + Polly (HTTP/2) listening on http://localhost:${PORT}`);
 });

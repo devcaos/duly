@@ -49,12 +49,22 @@ One entry per problem with an Amazon/AWS/MCP tool, SDK or doc. Write it when it 
 - **Workaround:** Forced tool call with `temperature: 0`, then validate `toolUse.input` with zod (`lib/llm/bedrock.ts`). Works for text, PNG and PDF input.
 - **Suggestion:** Add a "supported models" table to the structured outputs page, and link the Nova forced-tool pattern from there.
 
-### Bedrock Runtime client only speaks HTTP/2: "Protocol error" against a local mock
-- **Tool / API / SDK:** AWS SDK for JavaScript v3, `@aws-sdk/client-bedrock-runtime` (Converse), `AWS_ENDPOINT_URL_BEDROCK_RUNTIME`
-- **Task I attempted:** Test the demo web's agent loop without AWS credentials by pointing the SDK at a small local mock of the Converse API.
+### Bedrock Runtime and Polly clients only speak HTTP/2: "Protocol error" against a local mock
+- **Tool / API / SDK:** AWS SDK for JavaScript v3 (3.1152), `@aws-sdk/client-bedrock-runtime` (Converse) and `@aws-sdk/client-polly`, `AWS_ENDPOINT_URL_BEDROCK_RUNTIME` / `AWS_ENDPOINT_URL_POLLY`
+- **Task I attempted:** Test the demo web without AWS credentials by pointing the SDK at a small local mock of the Converse and SynthesizeSpeech APIs.
 - **Steps I took:** Started a Node `http` server that answers `POST /model/{modelId}/converse`, set `AWS_ENDPOINT_URL_BEDROCK_RUNTIME=http://localhost:4010` and fake credentials, then called `ConverseCommand`.
-- **Expected:** The request reaches the mock, like it does for Polly with `AWS_ENDPOINT_URL_POLLY`.
-- **What actually happened:** Every call failed with a bare `Error: Protocol error` (no status, no hint). The Bedrock Runtime client uses an HTTP/2 request handler (because the service has bidirectional streaming operations), even for plain `Converse`, so it can't talk to an HTTP/1.1 endpoint. This isn't mentioned in the endpoint-override docs.
+- **Expected:** The requests reach the mock, as they would with any HTTP endpoint.
+- **What actually happened:** Every call failed with a bare `Error: Protocol error` (no status, no hint). Both clients use an HTTP/2 request handler (`NodeHttp2Handler`), even for plain `Converse` and `SynthesizeSpeech`, so they can't talk to an HTTP/1.1 endpoint. This isn't mentioned in the endpoint-override docs, and I first assumed only Bedrock (which has bidirectional streaming) was affected.
 - **Severity:** minor
-- **Workaround:** Serve the Bedrock mock with `node:http2` (`createServer`, plaintext h2c) and keep Polly on HTTP/1.1, on a second port (`scripts/mock-aws.mjs`).
+- **Workaround:** Serve the mock with `node:http2` (`createServer`, plaintext h2c), one port for both services (`scripts/mock-aws.mjs`).
 - **Suggestion:** Wrap the HTTP/2 failure in a clearer error ("endpoint does not support HTTP/2"), and note in the service-specific endpoints docs that some clients require HTTP/2.
+
+### MCP `subscriptions/listen` streams never close on a serverless deploy
+- **Tool / API / SDK:** MCP TypeScript SDK v2 (`@modelcontextprotocol/server` 2.3.1) via `mcp-handler` 2.3.0, Streamable HTTP, spec 2026-07-28, on Vercel
+- **Task I attempted:** Run Duly's stateless MCP endpoint on Vercel with `maxDuration = 60`.
+- **Steps I took:** Deployed, connected modern (2026-07-28) clients, then read the Vercel logs.
+- **Expected:** Every request to a stateless server finishes in a few seconds.
+- **What actually happened:** Almost every minute a `POST /api/mcp` ended in "Task timed out after 60 seconds". Modern clients send a `subscriptions/listen` request, and the server answers with an SSE stream that it keeps open forever (keep-alive every 15 s) because `McpServer` advertises `tools.listChanged: true` by default once a tool is registered. Vercel kills the function at `maxDuration`, the client listens again, and the cycle repeats. Nothing in the `mcp-handler` README mentions this.
+- **Severity:** major (wasted function time, noisy error logs)
+- **Workaround:** Duly's tools never change, so the handler advertises `capabilities: { tools: { listChanged: false } }`. The SDK then acknowledges the listen request and closes the stream at once (`app/api/mcp/route.ts`). Verified locally: the listen POST went from staying open indefinitely to 10 ms.
+- **Suggestion:** Default `listChanged` to false unless the server actually changes its tool list, or have serverless adapters like `mcp-handler` warn and cap listen streams below the platform timeout.

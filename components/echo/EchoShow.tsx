@@ -13,7 +13,7 @@ import {
   MatchesCard,
   WarrantyCard,
 } from "./cards";
-import type { DeadlineItem } from "./cards";
+import type { DeadlineItem, DraftData } from "./cards";
 import { useClock, useFitScale, useSpeechSupported } from "./hooks";
 import { speak, startListening, stopSpeaking } from "./voice";
 import styles from "./echo.module.css";
@@ -163,6 +163,18 @@ export default function EchoShow() {
     [answer],
   );
 
+  // Same document and intent, firm tone: called directly, so the model can't change them.
+  function makeFirmer(draft: DraftData) {
+    void answer("Make it firmer.", () =>
+      postChat({
+        call: {
+          name: "draft_reply",
+          arguments: { document_id: draft.document.id, intent: draft.intent, tone: "firm" },
+        },
+      }),
+    );
+  }
+
   function onSubmit(event: FormEvent) {
     event.preventDefault();
     ask(input);
@@ -249,7 +261,7 @@ export default function EchoShow() {
                 className={`${styles.screenLayer} ${styles.screenEnter} ${busy || mode === "listening" ? styles.dimmed : ""}`}
                 aria-live="polite"
               >
-                <ScreenView screen={screen} home={home} busy={busy} onFirmer={() => ask("Make it firmer.")} />
+                <ScreenView screen={screen} home={home} busy={busy} onFirmer={makeFirmer} />
               </div>
               <Caption mode={mode} text={caption} />
               <div className={`${styles.lightBar} ${styles[`light_${mode}`]}`} aria-hidden="true" />
@@ -330,7 +342,7 @@ function ScreenView({
   screen: Screen;
   home: HomeDeadlines;
   busy: boolean;
-  onFirmer: () => void;
+  onFirmer: (draft: DraftData) => void;
 }) {
   if (screen.kind === "home") return <HomeScreen home={home} />;
   return (
@@ -357,7 +369,7 @@ function ScreenView({
   );
 }
 
-function CardView({ card, busy, onFirmer }: { card: Card; busy: boolean; onFirmer: () => void }) {
+function CardView({ card, busy, onFirmer }: { card: Card; busy: boolean; onFirmer: (draft: DraftData) => void }) {
   switch (card.kind) {
     case "deadlines":
       return <DeadlinesCard data={card.data} />;

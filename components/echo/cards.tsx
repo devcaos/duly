@@ -47,8 +47,9 @@ interface WarrantyData {
   };
 }
 
-interface DraftData {
-  document: { title: string; issuer: string };
+export interface DraftData {
+  document: { id: string; title: string; issuer: string };
+  intent: string;
   tone: "polite" | "firm";
   subject: string;
   body: string;
@@ -276,7 +277,7 @@ export function DraftCard({
   busy,
 }: {
   data: Record<string, unknown>;
-  onFirmer: () => void;
+  onFirmer: (draft: DraftData) => void;
   busy: boolean;
 }) {
   const draft = data as unknown as DraftData;
@@ -311,7 +312,7 @@ export function DraftCard({
         <button
           type="button"
           className={`${styles.paperButton} ${styles.paperButtonGhost}`}
-          onClick={onFirmer}
+          onClick={() => onFirmer(draft)}
           disabled={busy || draft.tone === "firm"}
         >
           {draft.tone === "firm" ? "Already firm" : "Make it firmer"}
