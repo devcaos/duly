@@ -6,7 +6,9 @@
 //   npm run smoke:bedrock -- https://your-preview.vercel.app
 // Routes: model = Nova picked the tool; forced-keyword / forced-any = Nova answered in text and
 // was asked again requiring a tool; server-default = the server called the tool itself.
-// Exit code 1 if any question gets the wrong tool, the wrong document or a wrong reply.
+// Exit code 1 if any question gets the wrong tool, the wrong document or a wrong reply, or if a
+// dispute letter fails its letter check (counted separately from the routing; skipped when the
+// routing already failed). "letter: OK (template)" means the server's fallback letter, not Nova's.
 // Questions about a bill must use the latest bill, never an earlier one ("-prev-" ids).
 // Never reads or prints environment values.
 
@@ -20,6 +22,7 @@ const BRIGHTWAVE_USAGE = /22% higher.*You used about 22% more electricity than u
 // Single questions, each with an empty history (like the first thing said to Alexa).
 // says: the spoken reply must match. documentId: the document the tool must use.
 // noEarlierBills: no earlier bill may appear in the deadlines card.
+// letter: the draft must dispute the bill, with its amount and no reason (letter check).
 const SINGLE = [
   { message: "What do I need to pay this month?", tool: "list_deadlines", noEarlierBills: true },
   { message: "Is my dishwasher still under warranty?", tool: "check_warranty" },
@@ -29,6 +32,13 @@ const SINGLE = [
   { message: "Is my Brightwave bill higher than usual?", tool: "compare_bills", says: BRIGHTWAVE_USAGE },
   { message: "Give me my weekly brief.", tool: "weekly_brief" },
   { message: "Is my fridge still under warranty?", tool: "check_warranty", says: /expiring soon/i },
+  {
+    message: "Write a firm letter to Brightwave Energy disputing my bill.",
+    tool: "draft_reply",
+    tone: "firm",
+    documentId: LATEST_BRIGHTWAVE,
+    letter: true,
+  },
 ];
 
 // One conversation: each question carries the earlier turns, like the page does. Most
@@ -43,6 +53,7 @@ const CONVERSATION = [
     message: "Write a reply to Brightwave Energy disputing my electricity bill.",
     tool: "draft_reply",
     documentId: LATEST_BRIGHTWAVE,
+    letter: true,
   },
   {
     message: "Make it firmer.",
@@ -50,6 +61,7 @@ const CONVERSATION = [
     tone: "firm",
     sameDocumentAsPrevious: true,
     documentId: LATEST_BRIGHTWAVE,
+    letter: true,
   },
 ];
 
@@ -79,6 +91,33 @@ function mainTool(turn) {
 
 let failures = 0;
 const routes = {};
+const letters = { checked: 0, failed: 0, skipped: 0 };
+
+// The Brightwave bill's amount, compared as a value ("$84.20", "84.2").
+const BRIGHTWAVE_AMOUNT = 84.2;
+// Same rules as lib/tools/draftReply.ts: cautious phrases ("correct any errors") give no reason.
+const ERROR_WORDS = /\b(error|errors|incorrect|mistakes?|overcharg\w*|wrong)\b/i;
+const CAUTIOUS = /\b(any|possible)\s+(errors?|mistakes?)(\s+or\s+(errors?|mistakes?))?\b|\bif\b[^.]*\b(wrong|incorrect)\b/gi;
+// The server's template letter (firm or polite), as built by templateDraft().
+const TEMPLATE_LETTER =
+  /^Dear [^\n]+\n\n(I dispute|I would like to dispute) the (\S+ charge|charges) on your [^\n]+\.\n\n(Please|Could you please) review this bill, correct it if needed, and send me an itemized breakdown/;
+
+function draftBody(result) {
+  return result.cards.find((card) => card.kind === "draft")?.data.body;
+}
+
+// What's wrong with a dispute letter (empty when it's fine).
+function letterProblems(result) {
+  const body = draftBody(result);
+  if (typeof body !== "string") return ["no draft card"];
+  const problems = [];
+  if (!/\b(disput|contest)/i.test(body)) problems.push("doesn't say it disputes the bill");
+  const numbers = body.replace(/(\d),(\d)/g, "$1$2").match(/\d+(?:\.\d+)?/g) ?? [];
+  if (!numbers.some((n) => Number(n) === BRIGHTWAVE_AMOUNT)) problems.push(`no amount ${BRIGHTWAVE_AMOUNT}`);
+  const reason = body.replace(CAUTIOUS, "").match(ERROR_WORDS);
+  if (reason) problems.push(`gives a reason ("${reason[0]}")`);
+  return problems;
+}
 
 async function run(title, questions, keepHistory) {
   console.log(`\n=== ${title} ===`);
@@ -119,6 +158,18 @@ async function run(title, questions, keepHistory) {
     console.log(`  ${problems.length > 0 ? "FAIL" : "OK  "}  tool: ${tools}${tone}  route: ${result.route}${doc}`);
     if (problems.length > 0) console.log(`        ${problems.join("; ")}`);
     console.log(`  says: ${result.reply}`);
+    if (question.letter && problems.length > 0) {
+      // Wrong tool or document: already a routing failure, so it isn't counted twice.
+      letters.skipped++;
+      console.log("  letter: skipped (routing failed)");
+    } else if (question.letter) {
+      // Reported on its own line and counted apart: never a routing failure.
+      const wrong = letterProblems(result);
+      letters.checked++;
+      if (wrong.length > 0) letters.failed++;
+      const source = TEMPLATE_LETTER.test(draftBody(result)) ? " (template)" : "";
+      console.log(`  letter: ${wrong.length > 0 ? `FAIL (${wrong.join("; ")})` : "OK"}${source}`);
+    }
 
     history = [...history, result.turn].slice(-MAX_HISTORY_TURNS);
     previous = main;
@@ -134,4 +185,6 @@ const summary = Object.entries(routes)
   .map(([route, count]) => `${route}: ${count}`)
   .join(", ");
 console.log(`\n${total - failures}/${total} OK. Routes: ${summary || "none"}.`);
-process.exit(failures > 0 ? 1 : 0);
+const skipped = letters.skipped > 0 ? ` (${letters.skipped} skipped)` : "";
+console.log(`Letter checks: ${letters.checked - letters.failed}/${letters.checked} OK${skipped}`);
+process.exit(failures > 0 || letters.failed > 0 ? 1 : 0);
