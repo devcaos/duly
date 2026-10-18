@@ -101,6 +101,7 @@ async function main() {
   await callTool("explain_document", { issuer: "City of Maplewood" });
   await callTool("draft_reply", { query: "electricity", intent: "ask for a payment extension of two weeks" });
   await callTool("draft_reply", { issuer: "Brightwave Energy", intent: "ask for a payment extension", tone: "firm" });
+  await callTool("draft_reply", { issuer: "Brightwave Energy", intent: "dispute my electricity bill", tone: "firm" });
 
   const filePath = process.argv[2];
   if (filePath) {

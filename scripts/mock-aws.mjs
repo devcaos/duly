@@ -213,7 +213,11 @@ function agentTurn(messages, mustUseTool) {
   if (/reply|write|letter|email|extension|draft|cancel/.test(q)) {
     return toolUseReply("draft_reply", {
       query: guessQuery(q, "electricity bill"),
-      intent: /cancel/.test(q) ? "cancel the membership" : "ask for a payment extension",
+      intent: /cancel/.test(q)
+        ? "cancel the membership"
+        : /disput/.test(q)
+          ? "dispute the electricity bill"
+          : "ask for a payment extension",
       tone: /firm/.test(q) ? "firm" : "polite",
     });
   }

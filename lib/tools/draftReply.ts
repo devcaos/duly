@@ -30,7 +30,7 @@ const SIGN_OFF = "Sincerely,\n[Your name]";
 const SYSTEM_PROMPT = `You write short replies (letters or emails) to companies and organizations on behalf of a household.
 Rules:
 - Use only facts, figures, dates and reference numbers that are in the document data. Never state a reason, complaint, fact or figure that isn't there, and don't propose new amounts or time periods.
-- To push back or question a charge, ask for a review and an itemized breakdown. Don't claim errors or give reasons.
+- To question a charge, ask for a review and an itemized breakdown. Never give reasons or say what is wrong with it (no "error", "incorrect", "overcharged").
 - Use reference numbers exactly as listed, with the label they have (an account number is never a bill or invoice number).
 - Write dates like "October 5, 2026", never as YYYY-MM-DD.
 - body: only the paragraphs. No greeting ("Dear ...") and no sign-off ("Sincerely", your name): they are added automatically.
@@ -48,6 +48,22 @@ const TONE_RULES: Record<Tone, (replyBy: string) => string> = {
 - Ask for a written answer by ${replyBy}, using that exact date.
 - Stay respectful: no threats, no legal claims, no ultimatums, no invented consequences.`,
 };
+
+// "Dispute my electricity bill", "Write a firm letter ... disputing my bill", "contest the charge".
+const DISPUTE = /\b(disput\w*|contest\w*)\b/i;
+
+export function isDisputeIntent(intent: string): boolean {
+  return DISPUTE.test(intent);
+}
+
+// Added to the prompt when the user disputes the bill: say it plainly, with no reasons.
+const DISPUTE_RULE = `The goal is to dispute this bill:
+- First sentence: say plainly that I dispute it, with the amount and the bill's date from the document (e.g. "I dispute the $X bill dated <date>").
+- Then ask them to review it, correct it if needed and send an itemized breakdown.
+- No reasons, no legal claims, no threats.`;
+
+// Words that say what is wrong with the bill: a reason the user never gave.
+const ERROR_WORDS = /\b(error|errors|incorrect|mistakes?|overcharg\w*|wrong)\b/gi;
 
 interface Reference {
   label: string; // "Account number"
@@ -71,6 +87,7 @@ export async function runDraftReply(input: {
   const today = todayISO();
   const replyBy = formatLongDate(addDays(today, 7));
   const references = findReferences(doc);
+  const dispute = isDisputeIntent(input.intent) ? { intent: input.intent, amount: billAmount(doc).amount } : undefined;
 
   const referenceList =
     references.length > 0
@@ -79,12 +96,13 @@ export async function runDraftReply(input: {
       : "This document has no reference numbers: don't mention any.";
   const prompt =
     `Today's date: ${formatLongDate(today)}.\n\nDocument:\n${documentForPrompt(doc)}\n\n${referenceList}\n\n` +
-    `${TONE_RULES[tone](replyBy)}\n\nWrite a ${tone} reply to ${doc.issuer}. Goal: ${input.intent}`;
+    `${TONE_RULES[tone](replyBy)}\n\n${dispute ? `${DISPUTE_RULE}\n\n` : ""}` +
+    `Write a ${tone} reply to ${doc.issuer}. Goal: ${input.intent}`;
   // Every figure the letter may contain comes from here.
   const allowedNumbers = numbersIn(`${documentForPrompt(doc)} ${input.intent} ${replyBy} ${formatLongDate(today)}`);
 
   let draft = normalize(await getLlm().generateJson({ system: SYSTEM_PROMPT, prompt, schema: draftSchema }));
-  let problems = findProblems(draft, allowedNumbers, references);
+  let problems = findProblems(draft, allowedNumbers, references, dispute);
   if (problems.length > 0) {
     // One retry, telling the model exactly what was wrong.
     console.warn(`[draft_reply] retrying: ${problems.length} problem(s) in the first draft`);
@@ -92,7 +110,7 @@ export async function runDraftReply(input: {
     draft = normalize(
       await getLlm().generateJson({ system: SYSTEM_PROMPT, prompt: `${prompt}\n\n${feedback}`, schema: draftSchema }),
     );
-    problems = findProblems(draft, allowedNumbers, references);
+    problems = findProblems(draft, allowedNumbers, references, dispute);
   }
   if (problems.length > 0) {
     // Still wrong: send a plain letter built only from the document data instead.
@@ -166,15 +184,36 @@ function numbersIn(text: string): Set<string> {
   return numbers;
 }
 
-// Only two checks, both objective: figures that aren't in the data, and reference numbers
-// written with the wrong label.
-function findProblems(draft: Draft, allowedNumbers: Set<string>, references: Reference[]): string[] {
+// Objective checks only: figures that aren't in the data, reference numbers written with the
+// wrong label and, for a dispute, that it says so with the bill's amount and gives no reason.
+export function findProblems(
+  draft: Draft,
+  allowedNumbers: Set<string>,
+  references: Reference[],
+  dispute?: { intent: string; amount?: number },
+): string[] {
   const text = `${draft.subject}\n${draft.body}`;
   const problems: string[] = [];
 
   const unknown = [...numbersIn(text)].filter((n) => !allowedNumbers.has(n));
   if (unknown.length > 0) {
     problems.push(`It contains figures that are not in the document data: ${unknown.join(", ")}. Remove them.`);
+  }
+
+  if (dispute) {
+    if (!/\bdisput/i.test(draft.body)) {
+      problems.push('It doesn\'t say plainly that I dispute the bill. Start with "I dispute ...".');
+    }
+    // Compared as values: "$84.20", "84.2" and "1,234.50" all match.
+    if (dispute.amount !== undefined && !numbersIn(draft.body).has(String(dispute.amount))) {
+      problems.push(`It doesn't mention the bill's amount (${dispute.amount}). Include it.`);
+    }
+    const reasons = [...new Set([...draft.body.matchAll(ERROR_WORDS)].map((m) => m[0].toLowerCase()))].filter(
+      (word) => !new RegExp(`\\b${word}\\b`, "i").test(dispute.intent),
+    );
+    if (reasons.length > 0) {
+      problems.push(`It gives a reason I didn't give (${reasons.join(", ")}). Remove it: only say that I dispute the bill.`);
+    }
   }
 
   for (const ref of references) {
@@ -217,17 +256,42 @@ function normalize(draft: Draft): Draft {
 
 // ---------- Fallback ----------
 
+// The amount the letter is about: the first deadline with an amount, else the document's.
+function billAmount(doc: Document) {
+  const deadline = [...doc.deadlines].sort((a, b) => a.date.localeCompare(b.date)).find((d) => d.amount !== undefined);
+  return { deadline, amount: deadline?.amount ?? doc.amount, currency: deadline?.currency ?? doc.currency };
+}
+
 // A plain letter for this intent and tone, built only from the document data
 // (issuer, labeled references, amount, dates and the requested reply date).
-function templateDraft(doc: Document, intent: string, tone: Tone, references: Reference[], replyBy: string): Draft {
+export function templateDraft(
+  doc: Document,
+  intent: string,
+  tone: Tone,
+  references: Reference[],
+  replyBy: string,
+): Draft {
   const goal = intent.trim().replace(/^to\s+/i, "").replace(/[.!]+$/, "");
   const title = doc.title.replace(/\s*\(SAMPLE\)/i, "");
   const refs = references.map((ref) => `${ref.label} ${ref.value}`).join(", ");
   const about = refs ? `${title} (${refs})` : title;
 
-  const deadline = [...doc.deadlines].sort((a, b) => a.date.localeCompare(b.date)).find((d) => d.amount !== undefined);
-  const amount = deadline?.amount ?? doc.amount;
-  const currency = deadline?.currency ?? doc.currency;
+  const { deadline, amount, currency } = billAmount(doc);
+  if (isDisputeIntent(intent)) {
+    // Never built from the intent's words: it may be the whole message ("Write a reply ...").
+    const charge = amount === undefined ? `the charges on ${about}` : `the ${formatMoney(amount, currency)} charge on ${about}`;
+    const dated = doc.issueDate ? `, dated ${formatLongDate(doc.issueDate)}` : "";
+    const body =
+      tone === "firm"
+        ? `I dispute ${charge}${dated}.\n\n` +
+          `Please review this bill, correct it if needed, and send me an itemized breakdown of the amount.\n\n` +
+          `Please reply in writing by ${replyBy}.`
+        : `I would like to dispute ${charge}${dated}.\n\n` +
+          `Could you please review this bill, correct it if needed, and send me an itemized breakdown?\n\n` +
+          `Thank you for your help. I would appreciate a reply by ${replyBy}.`;
+    return { subject: `Dispute: ${about}`, body };
+  }
+
   const amountSentence =
     amount === undefined
       ? ""
