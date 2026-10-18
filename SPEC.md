@@ -31,7 +31,7 @@ Out of scope for the hackathon: real payments, multi-user accounts, OAuth, email
 
 - Endpoint: `/api/mcp` on the Next.js app, **Streamable HTTP**, spec **2025-11-25 or later**.
 - Library: `mcp-handler` (v2) + official MCP TypeScript SDK + `zod`. Verify current versions and API in their docs before coding.
-- Auth: none for the demo (single demo household `demo`). Mitigations: max upload size 3 MB decoded (≈4 MB as base64, under Vercel's 4.5 MB request body limit), basic rate limiting, AWS Budget alert, demo data only.
+- Auth: none for the demo (single demo household `demo`). Mitigations: max upload size 3 MB decoded (≈4 MB as base64, under Vercel's 4.5 MB request body limit), basic rate limiting, AWS Budget alert, demo data only. Host allowlist against DNS rebinding: `/api/mcp` answers 403 (before reading the body) unless `Host` is localhost/127.0.0.1/[::1], one of the deployment's Vercel hosts, or listed in `MCP_ALLOWED_HOSTS` (comma-separated). `Origin` is not enforced (server-side clients send none).
 - Every tool returns a short `text` content suitable to be **spoken** (1–3 sentences) plus `structuredContent` with the full data for screens.
 
 ### Tools
