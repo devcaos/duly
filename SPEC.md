@@ -54,6 +54,14 @@ Out of scope for the hackathon: real payments, multi-user accounts, OAuth, email
    - Output: subject + body draft referencing the document's numbers and dates.
 6. `search_documents` (helper)
    - Input: `{ query: string }`. Output: top matches (id, title, issuer, type).
+7. `compare_bills`
+   - Input: `{ query?: string, issuer?: string }` (neither: compare every issuer that has earlier bills).
+   - Output: the issuer's latest bill vs the previous one and vs the average of the earlier ones (difference and percentage), e.g. "Your Brightwave Energy bill is $84.20, about 22% higher than your usual $69." States only the stored numbers, never a reason. No LLM.
+8. `weekly_brief`
+   - Input: `{ days?: number }` (default 7, max 60).
+   - Output: deadlines in the period with amounts, renewals that can still be cancelled, warranties ending within 60 days, and latest bills at least 15% above the average of the earlier ones that still have an open deadline. Spoken: max 3 sentences, most urgent first. No LLM.
+
+When an issuer has several bills, document lookups (search, explain, draft) always prefer the latest one (by issue date, else creation date).
 
 ## 5. Data model
 
@@ -96,6 +104,8 @@ A page that looks like an Echo Show screen (landscape, rounded bezel, big readab
 ## 8. Sample data
 
 Six clearly fictional documents (fictional brands, marked SAMPLE), in English, generated as PNG/PDF in `/samples`: electricity bill (Brightwave Energy), car insurance renewal (Northpoint Mutual), dishwasher receipt with 2-year warranty (HomeHub Appliances), city parking/tax notice (City of Maplewood), gym auto-renewal (PeakFit), school field-trip form with fee (Maplewood Elementary). Dates relative to the demo week so deadlines are always upcoming.
+
+The seed also has documents without a sample file: four warranties (VisionMax TV with plenty of time left, FrostLine fridge ending in about 20 days, AquaSpin washing machine that expired about a month ago, Pinewood Computers laptop with a year left) and two earlier, already paid bills each from Brightwave Energy and Riverside Water Company for `compare_bills`. Earlier bills have no deadlines, so they never appear as upcoming. A Riverside water bill (sample 7, not in the seed) is used for the live upload demo.
 
 ## 9. Agent Skill
 

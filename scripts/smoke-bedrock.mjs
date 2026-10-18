@@ -6,28 +6,49 @@
 //   npm run smoke:bedrock -- https://your-preview.vercel.app
 // Routes: model = Nova picked the tool; forced-keyword / forced-any = Nova answered in text and
 // was asked again requiring a tool; server-default = the server called the tool itself.
-// Exit code 1 if any question gets the wrong tool. Never reads or prints environment values.
+// Exit code 1 if any question gets the wrong tool, the wrong document or a wrong reply.
+// Questions about a bill must use the latest bill, never an earlier one ("-prev-" ids).
+// Never reads or prints environment values.
 
 const BASE_URL = (process.argv[2] ?? "http://localhost:3000").replace(/\/$/, "");
 const MAX_HISTORY_TURNS = 4; // same as lib/agent/types.ts
 
+const LATEST_BRIGHTWAVE = "doc-brightwave-bill";
+
 // Single questions, each with an empty history (like the first thing said to Alexa).
+// says: the spoken reply must match. documentId: the document the tool must use.
+// noEarlierBills: no earlier bill may appear in the deadlines card.
 const SINGLE = [
-  { message: "What do I need to pay this month?", tool: "list_deadlines" },
+  { message: "What do I need to pay this month?", tool: "list_deadlines", noEarlierBills: true },
   { message: "Is my dishwasher still under warranty?", tool: "check_warranty" },
   { message: "Which of my warranties are still active?", tool: "check_warranty" },
   { message: "Explain the parking fine letter.", tool: "explain_document" },
+  { message: "Explain my Brightwave electricity bill.", tool: "explain_document", documentId: LATEST_BRIGHTWAVE },
+  { message: "Is my Brightwave bill higher than usual?", tool: "compare_bills", says: /22% higher/ },
+  { message: "Give me my weekly brief.", tool: "weekly_brief" },
+  { message: "Is my fridge still under warranty?", tool: "check_warranty", says: /expiring soon/i },
 ];
 
 // One conversation: each question carries the earlier turns, like the page does. Most
 // questions come right after a turn that returned a document.
 const CONVERSATION = [
   { message: "Explain the parking fine letter.", tool: "explain_document" },
+  { message: "Is my Brightwave bill higher than usual?", tool: "compare_bills", says: /22% higher/ },
   { message: "Is my dishwasher still under warranty?", tool: "check_warranty" },
   { message: "Which of my warranties are still active?", tool: "check_warranty" },
-  { message: "What do I need to pay this month?", tool: "list_deadlines" },
-  { message: "Write a reply to Brightwave Energy disputing my electricity bill.", tool: "draft_reply" },
-  { message: "Make it firmer.", tool: "draft_reply", tone: "firm", sameDocumentAsPrevious: true },
+  { message: "What do I need to pay this month?", tool: "list_deadlines", noEarlierBills: true },
+  {
+    message: "Write a reply to Brightwave Energy disputing my electricity bill.",
+    tool: "draft_reply",
+    documentId: LATEST_BRIGHTWAVE,
+  },
+  {
+    message: "Make it firmer.",
+    tool: "draft_reply",
+    tone: "firm",
+    sameDocumentAsPrevious: true,
+    documentId: LATEST_BRIGHTWAVE,
+  },
 ];
 
 async function ask(message, history) {
@@ -78,12 +99,22 @@ async function run(title, questions, keepHistory) {
     if (question.sameDocumentAsPrevious && main?.documentId !== previous?.documentId) {
       problems.push("expected the same document as the previous draft");
     }
+    if (question.documentId && main?.documentId !== question.documentId) {
+      problems.push(`expected document ${question.documentId}, got ${main?.documentId ?? "none"}`);
+    }
+    if (main?.documentId?.includes("-prev-")) problems.push(`used an earlier bill (${main.documentId})`);
+    if (question.says && !question.says.test(result.reply)) problems.push(`expected the reply to match ${question.says}`);
+    if (question.noEarlierBills) {
+      const listed = result.cards.flatMap((card) => card.data.deadlines ?? []).map((d) => d.documentId);
+      if (listed.some((id) => id.includes("-prev-"))) problems.push("an earlier bill was listed as a deadline");
+    }
     if (problems.length > 0) failures++;
     routes[result.route] = (routes[result.route] ?? 0) + 1;
 
     const tools = result.turn.tools.map((tool) => tool.name).join(" -> ") || "none";
     const tone = main?.input.tone ? ` (tone: ${main.input.tone})` : "";
-    console.log(`  ${problems.length > 0 ? "FAIL" : "OK  "}  tool: ${tools}${tone}  route: ${result.route}`);
+    const doc = main?.documentId ? `  doc: ${main.documentId}` : "";
+    console.log(`  ${problems.length > 0 ? "FAIL" : "OK  "}  tool: ${tools}${tone}  route: ${result.route}${doc}`);
     if (problems.length > 0) console.log(`        ${problems.join("; ")}`);
     console.log(`  says: ${result.reply}`);
 

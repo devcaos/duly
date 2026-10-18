@@ -83,9 +83,19 @@ async function main() {
   await callTool("list_deadlines", {});
   await callTool("list_deadlines", { payable: true });
   await callTool("check_warranty", { product: "dishwasher" });
+  await callTool("check_warranty", { product: "fridge" });
+  await callTool("check_warranty", { product: "washing machine" });
   await callTool("check_warranty", {});
+  await callTool("compare_bills", { issuer: "Brightwave Energy" });
+  await callTool("compare_bills", { query: "electricity" });
+  await callTool("compare_bills", {});
+  await callTool("weekly_brief", {});
+  await callTool("weekly_brief", { days: 30 });
   await callTool("search_documents", { query: "car insurance" });
+  await callTool("search_documents", { query: "Brightwave bill" });
   await callTool("add_document", { text: SAMPLE_LETTER });
+  // The water bill just added is now the latest Riverside bill.
+  await callTool("compare_bills", { issuer: "Riverside Water Company" });
   await callTool("list_deadlines", { kind: "payment_due" });
   await callTool("explain_document", { query: "parking", question: "What happens if I ignore it?" });
   await callTool("explain_document", { issuer: "City of Maplewood" });

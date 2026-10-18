@@ -9,9 +9,24 @@ Duly is a standard remote MCP server (Streamable HTTP, no sign-in). Production e
 https://<your-project>.vercel.app/api/mcp
 ```
 
-It comes with 6 fictional sample documents (marked SAMPLE): an electricity bill, a car insurance renewal, a dishwasher receipt with warranty, a parking notice, a gym auto-renewal and a school field-trip form. All dates are relative to today, so deadlines are always upcoming.
+It comes with 14 fictional sample documents (marked SAMPLE): an electricity bill, a car insurance renewal, a dishwasher receipt with warranty, a parking notice, a gym auto-renewal and a school field-trip form, plus four more warranties (a TV, a fridge that is about to run out, an expired washing machine and a laptop) and two earlier electricity and water bills each, so bills can be compared. All dates are relative to today, so deadlines are always upcoming; the earlier bills are already paid and never show up as deadlines.
 
-> **Demo storage:** with `STORAGE=aws`, documents live in Amazon DynamoDB and survive restarts (the demo household is reset to the 6 samples with `npm run seed:aws`). With `STORAGE=memory`, documents you add with `add_document` can disappear when the server restarts; the sample documents always come back. Requests are rate-limited per IP.
+### Tools
+
+| Tool | What it does | Uses the LLM |
+| --- | --- | --- |
+| `add_document` | Saves a bill, letter, warranty... from text or a photo/PDF and extracts its deadlines. | yes |
+| `list_deadlines` | Upcoming deadlines sorted by date, with amounts ("what do I need to pay this month?"). | no |
+| `explain_document` | Plain-language explanation, what happens if you ignore it, next step. | yes |
+| `check_warranty` | One product's warranty (days left, how to claim) or every warranty with its status: active, expiring soon or expired. | no |
+| `draft_reply` | Short letter or email that uses the document's real numbers and dates. | yes |
+| `search_documents` | Finds stored documents by keywords. | no |
+| `compare_bills` | Latest bill from a company vs the previous one and vs the usual (average) amount, with percentages ("is my Brightwave bill higher than usual?"). Only states the numbers, never a reason. | no |
+| `weekly_brief` | The next 7 days (or `days`), most urgent first: deadlines with amounts, renewals you can still cancel, warranties ending within 60 days and bills at least 15% above usual. | no |
+
+When a company has several bills, search, explanations and drafts always use the latest one.
+
+> **Demo storage:** with `STORAGE=aws`, documents live in Amazon DynamoDB and survive restarts (the demo household is reset to the sample documents with `npm run seed:aws`). With `STORAGE=memory`, documents you add with `add_document` can disappear when the server restarts; the sample documents always come back. Requests are rate-limited per IP.
 
 ### Echo Show simulator (demo web)
 
@@ -30,7 +45,7 @@ Rate limits: `/api/chat` and `/api/speak` limit each visitor by IP. Set `DULY_IN
 
 1. Run `npx @modelcontextprotocol/inspector` (it opens in your browser).
 2. Set **Transport Type** to `Streamable HTTP` and **URL** to the production endpoint above.
-3. Click **Connect**, open **Tools**, click **List Tools** and run any of the 6 tools, for example `list_deadlines` with no arguments or `check_warranty` with `product: "dishwasher"`.
+3. Click **Connect**, open **Tools**, click **List Tools** and run any of the 8 tools, for example `list_deadlines` with no arguments or `check_warranty` with `product: "dishwasher"`.
 
 From a terminal, you can also call every tool in one go:
 
@@ -73,7 +88,7 @@ Duly runs on AWS when `STORAGE=aws` and `LLM_PROVIDER=bedrock` (region `eu-west-
 Setup scripts (AWS SDK for JavaScript v3):
 
 - [`scripts/setup-aws.ts`](scripts/setup-aws.ts) – `npm run setup:aws` creates the DynamoDB table and the private S3 bucket. Safe to run again.
-- [`scripts/seed-aws.ts`](scripts/seed-aws.ts) – `npm run seed:aws` resets the demo household to the 6 sample documents, with dates relative to today.
+- [`scripts/seed-aws.ts`](scripts/seed-aws.ts) – `npm run seed:aws` resets the demo household to the sample documents (lib/storage/seed.ts), with dates relative to today.
 
 If Bedrock is throttled, temporarily unavailable or times out, `LLM_FALLBACK=gemini` retries the same request with Google Gemini, and the server log says which provider answered (`[llm] answered by bedrock`). The fallback is **not** used for `AccessDenied`, validation or other client errors: those mean the AWS setup is wrong, so Duly logs `AWS is misconfigured` and returns a generic error. Logs only contain the error name, HTTP status and a short message (ARNs, account IDs and request IDs are masked), and tool callers never see configuration details.
 
