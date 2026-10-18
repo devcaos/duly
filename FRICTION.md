@@ -100,6 +100,7 @@ One entry per problem with an Amazon/AWS/MCP tool, SDK or doc. Write it when it 
 - **Severity:** minor
 - **Workaround:** Follow the v1 rules conservatively and verify with real calls (`npm run test:bedrock` in mcp-bedrock-bridge).
 - **Suggestion:** Add a "Tool schema and tool result constraints" section to the Nova 2 guide with the accepted JSON Schema keywords and allowed content combinations.
+- **Update (untyped properties):** The docs also don't say whether a property in a tool schema needs a `"type"` (for example zod's `z.any()`). The Nova v1 docs only restrict the root (`type`, `properties`, `required`) and the Nova 2 docs say nothing about property keywords. mcp-bedrock-bridge added a live probe: Nova 2 Lite accepted an untyped property in one run, which isn't a guarantee, so the library keeps such properties with an untyped-schema warning, throws under `onUnsafeSchema: "throw"` and marks them as unverified.
 
 ### MCP SDK v1: `callTool` returns a union with the legacy format
 - **Tool / API / SDK:** `@modelcontextprotocol/sdk` 1.32.1, `Client.callTool`
@@ -110,3 +111,13 @@ One entry per problem with an Amazon/AWS/MCP tool, SDK or doc. Write it when it 
 - **Severity:** minor
 - **Workaround:** mcp-bedrock-bridge also accepts the legacy shape and treats `toolResult` like `structuredContent`.
 - **Suggestion:** An overload that returns only `CallToolResult` when the negotiated protocol is current, or a type guard exported by the SDK.
+
+### The Bedrock API reference doesn't list image limits for tool results
+- **Tool / API / SDK:** Amazon Bedrock Converse API reference (`ImageBlock`, `ImageSource`, `ToolResultContentBlock`)
+- **Task I attempted:** Document size and count limits for images that mcp-bedrock-bridge puts in a `toolResult`.
+- **Steps I took:** Read the `ImageBlock`, `ImageSource` and `ToolResultContentBlock` pages.
+- **Expected:** Maximum image size, dimensions and number of images per request, next to the fields.
+- **What actually happened:** Only `bytes` "Minimum length of 1" and the formats (`png`, `jpeg`, `gif`, `webp`). No maximums, so the bridge README marks the limits as unverified.
+- **Severity:** minor
+- **Workaround:** Don't cap images in the library; turn empty images (0 bytes) into text markers, because the minimum is documented.
+- **Suggestion:** Put the image limits on the API reference pages, or link to them from there.
