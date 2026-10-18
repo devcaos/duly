@@ -31,6 +31,11 @@ export const deadlineSchema = z.object({
   currency: z.string().optional(),
 });
 
+export const usageSchema = z.object({
+  quantity: z.number(),
+  unit: z.string(),
+});
+
 // Same shape as the Document type in lib/types.ts (checked below).
 export const documentSchema = z.object({
   id: z.string(),
@@ -45,6 +50,7 @@ export const documentSchema = z.object({
   summary: z.string(),
   actionItems: z.array(z.string()),
   product: z.string().optional(),
+  usage: usageSchema.optional(),
   rawText: z.string(),
   fileKey: z.string().optional(),
   createdAt: z.string(),

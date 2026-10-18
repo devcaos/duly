@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import type { CSSProperties, ReactNode } from "react";
-import { daysBetween, formatMoney, formatSpokenDate } from "@/lib/dates";
+import { daysBetween, formatMoney, formatSpokenDate, formatUnitPrice, perUnit } from "@/lib/dates";
 import { useCountUp } from "./hooks";
 import styles from "./echo.module.css";
 
@@ -89,7 +89,17 @@ interface BillComparison {
   percentVsAverage?: number;
   averageAmount?: number;
   trend: "higher" | "lower" | "about_the_same" | "no_history";
+  // Only when the latest and an earlier bill state their usage in the same unit.
+  usageUnit?: string;
+  usageQuantity?: number;
+  usagePercentVsAverage?: number;
+  usageTrend?: ChangeTrend;
+  unitPrice?: number;
+  unitPricePercentVsAverage?: number;
+  unitPriceTrend?: ChangeTrend;
 }
+
+type ChangeTrend = "higher" | "lower" | "about_the_same";
 
 interface ComparisonData {
   query?: string;
@@ -532,8 +542,31 @@ export function ComparisonCard({ data }: { data: Record<string, unknown> }) {
           )}
         </div>
       )}
+      {comparison.usageUnit !== undefined && comparison.usageQuantity !== undefined && comparison.unitPrice !== undefined && (
+        <div className={`${styles.listFooter} ${styles.enter}`} style={enterStyle(2)}>
+          <span>
+            Usage{" "}
+            <strong className={styles.amount}>
+              {comparison.usageQuantity.toLocaleString("en-US")} {comparison.usageUnit}
+            </strong>{" "}
+            {changeLabel(comparison.usagePercentVsAverage, comparison.usageTrend)}
+          </span>
+          <span>
+            Per {perUnit(comparison.usageUnit)}{" "}
+            <strong className={styles.amount}>{formatUnitPrice(comparison.unitPrice, comparison.currency)}</strong>{" "}
+            {changeLabel(comparison.unitPricePercentVsAverage, comparison.unitPriceTrend)}
+          </span>
+        </div>
+      )}
     </div>
   );
+}
+
+// "+22%", "−8%" or "about usual", for usage and price per unit.
+function changeLabel(pct: number | undefined, trend: ChangeTrend | undefined): string {
+  if (pct === undefined || trend === undefined) return "";
+  if (trend === "about_the_same") return "· about usual";
+  return `· ${pct > 0 ? "+" : "−"}${Math.round(Math.abs(pct))}%`;
 }
 
 // One row per company: latest amount and the change vs usual.

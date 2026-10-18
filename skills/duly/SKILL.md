@@ -64,6 +64,7 @@ An error result (`isError: true`) has one short text that is safe to say to the 
 - **When:** "Is my Brightwave bill higher than usual?", "compare my water bill", "are any of my bills higher than usual?".
 - **Inputs:** `issuer` or `query`. Leave both out to compare every company that has earlier bills.
 - **Returns:** the company's latest bill vs the previous one and vs the average of the earlier ones (difference and percentage), and a trend (`higher`, `lower`, `about_the_same` within 5%, `no_history`). Numbers only, no reasons. No LLM.
+- **Usage:** when the latest bill and at least one earlier bill store their usage in the same unit (kWh, gallons), it also returns `usageQuantity`, `usageUnit`, `averageUsage`, `usagePercentVsAverage`, `unitPrice`, `averageUnitPrice`, `unitPricePercentVsAverage` (plus `usageTrend` and `unitPriceTrend`) and adds one spoken sentence that tells "you used more" apart from "the price went up": "You used about 22% more electricity than usual, at about the same price per kWh." Without usage, or with different units, these fields are absent and the reply is the same as before.
 - **Example:** "Is my electricity bill higher than usual?" → `{ query: "electricity" }`
 
 ### weekly_brief
@@ -100,6 +101,7 @@ Call exactly one tool per question. Never invent document ids: reuse one from an
 
 - Only state facts returned by the tools. If Duly has no data, say so; don't guess.
 - Never invent a reason for a bill increase. `compare_bills` gives numbers only; neither should you.
+- The same goes for usage: "you used 22% more electricity" is a fact; never guess why (weather, holidays, guests) and never suggest switching provider. If there is no usage sentence, Duly doesn't know the usage: don't estimate it.
 - No legal or financial advice. Duly explains documents; keep the "This isn't legal advice." disclaimer and suggest contacting the issuer or a professional when it matters.
 - `draft_reply` only drafts. It sends nothing; the user reviews and sends the letter. Never say it was sent. If the user didn't say what the reply should achieve, ask before drafting.
 - When a company has several bills, the latest one wins. Lookups (search, explain, draft) and comparisons already use it; never answer about an earlier, already paid bill as if it were current.
@@ -113,7 +115,7 @@ The demo questions from `scripts/smoke-bedrock.mjs`, in one conversation with th
    Duly speaks a short explanation of the City of Maplewood notice, ending with "This isn't legal advice."
 2. **User:** "Is my Brightwave bill higher than usual?"
    → `compare_bills { issuer: "Brightwave Energy" }`
-   "Your Brightwave Energy bill is $84.20, about 22% higher than your usual $69. That's $14.10 more than your previous bill of $70.10."
+   "Your Brightwave Energy bill is $84.20, about 22% higher than your usual $69. You used about 22% more electricity than usual, at about the same price per kWh. That's $14.10 more than your previous bill of $70.10."
 3. **User:** "Is my dishwasher still under warranty?"
    → `check_warranty { product: "dishwasher" }`
    Duly says until when it is covered, how many days are left and how to claim.

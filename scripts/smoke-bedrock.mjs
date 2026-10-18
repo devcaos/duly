@@ -14,6 +14,8 @@ const BASE_URL = (process.argv[2] ?? "http://localhost:3000").replace(/\/$/, "")
 const MAX_HISTORY_TURNS = 4; // same as lib/agent/types.ts
 
 const LATEST_BRIGHTWAVE = "doc-brightwave-bill";
+// The Brightwave bill is higher because more was used, not because the price per kWh went up.
+const BRIGHTWAVE_USAGE = /22% higher.*You used about 22% more electricity than usual, at about the same price per kWh\./;
 
 // Single questions, each with an empty history (like the first thing said to Alexa).
 // says: the spoken reply must match. documentId: the document the tool must use.
@@ -24,7 +26,7 @@ const SINGLE = [
   { message: "Which of my warranties are still active?", tool: "check_warranty" },
   { message: "Explain the parking fine letter.", tool: "explain_document" },
   { message: "Explain my Brightwave electricity bill.", tool: "explain_document", documentId: LATEST_BRIGHTWAVE },
-  { message: "Is my Brightwave bill higher than usual?", tool: "compare_bills", says: /22% higher/ },
+  { message: "Is my Brightwave bill higher than usual?", tool: "compare_bills", says: BRIGHTWAVE_USAGE },
   { message: "Give me my weekly brief.", tool: "weekly_brief" },
   { message: "Is my fridge still under warranty?", tool: "check_warranty", says: /expiring soon/i },
 ];
@@ -33,7 +35,7 @@ const SINGLE = [
 // questions come right after a turn that returned a document.
 const CONVERSATION = [
   { message: "Explain the parking fine letter.", tool: "explain_document" },
-  { message: "Is my Brightwave bill higher than usual?", tool: "compare_bills", says: /22% higher/ },
+  { message: "Is my Brightwave bill higher than usual?", tool: "compare_bills", says: BRIGHTWAVE_USAGE },
   { message: "Is my dishwasher still under warranty?", tool: "check_warranty" },
   { message: "Which of my warranties are still active?", tool: "check_warranty" },
   { message: "What do I need to pay this month?", tool: "list_deadlines", noEarlierBills: true },

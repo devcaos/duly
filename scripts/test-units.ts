@@ -12,7 +12,8 @@ import { limitSentences } from "../lib/speech";
 import { getStorage, HOUSEHOLD_ID } from "../lib/storage";
 import { buildSeedDocuments } from "../lib/storage/seed";
 import { runCheckWarranty } from "../lib/tools/checkWarranty";
-import { compareIssuerBills, isNoticeablyHigher, runCompareBills } from "../lib/tools/compareBills";
+import { fromItem, toItem } from "../lib/storage/aws";
+import { compareIssuerBills, isNoticeablyHigher, runCompareBills, usageSentence } from "../lib/tools/compareBills";
 import { runListDeadlines } from "../lib/tools/listDeadlines";
 import { resolveDocument } from "../lib/tools/resolveDocument";
 import { runWeeklyBrief } from "../lib/tools/weeklyBrief";
@@ -169,6 +170,84 @@ check("weekly_brief threshold: at least 15% above the average of earlier bills",
   assert.equal(isNoticeablyHigher(compareIssuerBills([bill("a", 500, 0)])), false);
 });
 
+// A fake bill that states its usage.
+function usageBill(id: string, amount: number, daysAgo: number, quantity: number, unit = "kWh"): Document {
+  return { ...bill(id, amount, daysAgo), usage: { quantity, unit } };
+}
+
+check("compare_bills usage: percentages vs the average of the earlier bills", () => {
+  // Earlier: 100 kWh for $100 and 140 kWh for $70 → usual 120 kWh, usual price (1 + 0.5) / 2 = $0.75.
+  const earlier = [usageBill("b", 100, 30, 100), usageBill("c", 70, 60, 140)];
+  const c = compareIssuerBills([usageBill("a", 120, 0, 150), ...earlier]);
+  assert.equal(c.usageUnit, "kWh");
+  assert.equal(c.usageQuantity, 150);
+  assert.equal(c.usageBillsCompared, 2);
+  assert.equal(c.averageUsage, 120);
+  assert.equal(c.usagePercentVsAverage, 25);
+  assert.equal(c.usageTrend, "higher");
+  assert.equal(c.unitPrice, 0.8);
+  assert.equal(c.averageUnitPrice, 0.75);
+  assert.equal(c.unitPricePercentVsAverage, 6.7);
+  assert.equal(c.unitPriceTrend, "higher");
+  assert.equal(usageSentence(c), "You used about 25% more electricity than usual, and the price per kWh is about 7% higher.");
+});
+
+check('compare_bills usage: "about the same" means a change under 5%', () => {
+  const earlier = [usageBill("b", 100, 30, 100), usageBill("c", 100, 60, 100)];
+  const same = compareIssuerBills([usageBill("a", 104.99, 0, 104.99), ...earlier]);
+  assert.equal(same.usageTrend, "about_the_same");
+  assert.equal(same.unitPriceTrend, "about_the_same");
+  assert.equal(usageSentence(same), "You used about the same amount of electricity as usual, at about the same price per kWh.");
+  const moreUsed = compareIssuerBills([usageBill("a", 105, 0, 105), ...earlier]);
+  assert.equal(moreUsed.usageTrend, "higher");
+  assert.equal(moreUsed.unitPriceTrend, "about_the_same");
+  assert.equal(usageSentence(moreUsed), "You used about 5% more electricity than usual, at about the same price per kWh.");
+  const pricier = compareIssuerBills([usageBill("a", 115, 0, 100), ...earlier]);
+  assert.equal(pricier.usageTrend, "about_the_same");
+  assert.equal(pricier.unitPriceTrend, "higher");
+  assert.equal(usageSentence(pricier), "You used about the same amount of electricity as usual, but the price per kWh is about 15% higher.");
+});
+
+check("compare_bills usage: water in gallons, one earlier bill is \"last time\"", () => {
+  const c = compareIssuerBills([usageBill("a", 45, 0, 5000, "gallons"), usageBill("b", 50, 30, 5000, "gallons")]);
+  assert.equal(usageSentence(c), "You used about the same amount of water as last time, but the price per gallon is about 10% lower.");
+});
+
+check("compare_bills usage: missing usage behaves exactly as before", () => {
+  const plain = compareIssuerBills([bill("a", 120, 0), bill("b", 100, 30)]);
+  const latestWithout = compareIssuerBills([bill("a", 120, 0), usageBill("b", 100, 30, 100)]);
+  const earlierWithout = compareIssuerBills([usageBill("a", 120, 0, 100), bill("b", 100, 30)]);
+  for (const c of [latestWithout, earlierWithout]) {
+    assert.deepEqual(c, plain);
+    assert.equal(usageSentence(c), "");
+  }
+  // Zero usage can't give a price per unit.
+  assert.equal(compareIssuerBills([usageBill("a", 120, 0, 0), usageBill("b", 100, 30, 100)]).usageUnit, undefined);
+});
+
+check("compare_bills usage: only earlier bills in the same unit count", () => {
+  const plain = compareIssuerBills([bill("a", 120, 0), bill("b", 100, 30)]);
+  const otherUnit = compareIssuerBills([usageBill("a", 120, 0, 100, "kWh"), usageBill("b", 100, 30, 10, "therms")]);
+  assert.deepEqual(otherUnit, plain);
+  assert.equal(usageSentence(otherUnit), "");
+  // "KWH" is "kWh"; the therms bill is left out of the averages (but not out of the amounts).
+  const mixed = compareIssuerBills([
+    usageBill("a", 120, 0, 120, "kWh"),
+    usageBill("b", 100, 30, 100, "KWH"),
+    usageBill("c", 80, 60, 10, "therms"),
+  ]);
+  assert.equal(mixed.previous.length, 2);
+  assert.equal(mixed.usageBillsCompared, 1);
+  assert.equal(mixed.averageUsage, 100);
+  assert.equal(mixed.usagePercentVsAverage, 20);
+});
+
+check("DynamoDB items keep the usage of a bill", () => {
+  const doc = usageBill("a", 84.2, 0, 412);
+  assert.deepEqual(fromItem(toItem(doc)), doc);
+  assert.deepEqual(fromItem(toItem(bill("b", 50, 0))).usage, undefined);
+});
+
 async function checkAsync(name: string, fn: () => Promise<void>) {
   await fn();
   passed++;
@@ -214,6 +293,27 @@ async function storageChecks() {
     assert.equal(c.percentVsAverage, 21.6);
     assert.equal(c.trend, "higher");
     assert.match(text, /^Your Brightwave Energy bill is \$84\.20, about 22% higher than your usual \$69\./);
+    // Used more, at about the same price per kWh.
+    assert.equal(c.usageQuantity, 412);
+    assert.equal(c.averageUsage, 338);
+    assert.equal(c.usagePercentVsAverage, 21.9);
+    assert.equal(c.unitPrice, 0.2044);
+    assert.equal(c.averageUnitPrice, 0.2049);
+    assert.ok(Math.abs(c.unitPricePercentVsAverage!) < 2);
+    assert.equal(
+      text,
+      "Your Brightwave Energy bill is $84.20, about 22% higher than your usual $69. " +
+        "You used about 22% more electricity than usual, at about the same price per kWh. " +
+        "That's $14.10 more than your previous bill of $70.10.",
+    );
+    assert.equal(limitSentences(text, 99), limitSentences(text, 3), "more than 3 sentences");
+  });
+
+  await checkAsync("compare_bills for every company: usage in the data, not in the speech", async () => {
+    const { structuredContent, text } = await runCompareBills({});
+    const brightwave = structuredContent.comparisons!.find((c) => c.issuer === "Brightwave Energy")!;
+    assert.equal(brightwave.usageTrend, "higher");
+    assert.doesNotMatch(text, /You used/);
   });
 
   await checkAsync("list_deadlines: earlier bills are never upcoming deadlines or payments", async () => {
@@ -278,6 +378,9 @@ async function storageChecks() {
     const water = await runCompareBills({ query: "water bill" });
     assert.equal(water.structuredContent.comparison?.latest.documentId, uploaded.id);
     assert.equal(water.structuredContent.comparison?.trend, "about_the_same");
+    // The uploaded bill has no usage: no usage numbers and no usage sentence.
+    assert.equal(water.structuredContent.comparison?.usageUnit, undefined);
+    assert.doesNotMatch(water.text, /You used/);
   });
 
   // Also saves into the shared store: a newer bill whose extraction missed the amount.

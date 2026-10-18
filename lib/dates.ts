@@ -72,6 +72,16 @@ export function formatMoney(amount: number, currency = "USD"): string {
   return new Intl.NumberFormat("en-US", { style: "currency", currency }).format(amount);
 }
 
+// "$0.204", "$0.0136": a price per kWh or per gallon, with 3 significant digits.
+export function formatUnitPrice(amount: number, currency = "USD"): string {
+  return new Intl.NumberFormat("en-US", { style: "currency", currency, maximumSignificantDigits: 3 }).format(amount);
+}
+
+// "gallons" → "gallon", for "price per gallon". "kWh" stays "kWh".
+export function perUnit(unit: string): string {
+  return unit.length > 1 && unit.endsWith("s") ? unit.slice(0, -1) : unit;
+}
+
 // "$69": rounded to whole units, for approximate amounts like "your usual $69".
 export function formatWholeMoney(amount: number, currency = "USD"): string {
   return new Intl.NumberFormat("en-US", { style: "currency", currency, maximumFractionDigits: 0, minimumFractionDigits: 0 }).format(
