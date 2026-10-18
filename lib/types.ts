@@ -46,6 +46,12 @@ export interface Deadline {
   currency?: string;
 }
 
+// How much was used in the billing period, e.g. 412 kWh or 4,100 gallons (bills only).
+export interface Usage {
+  quantity: number;
+  unit: string;
+}
+
 export interface Document {
   id: string;
   householdId: string;
@@ -59,6 +65,7 @@ export interface Document {
   summary: string;
   actionItems: string[];
   product?: string; // for warranties/receipts
+  usage?: Usage; // for bills that state how much was used
   rawText: string;
   fileKey?: string;
   createdAt: string;

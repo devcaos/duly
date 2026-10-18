@@ -5,6 +5,8 @@ import { addDays } from "@/lib/dates";
 // warranties (active, expiring soon, expired) and earlier bills for compare_bills.
 // All dates are relative to `today`, so the deadlines are always upcoming.
 // Earlier bills are already paid: they have no deadlines, so they never show up as due.
+// Brightwave bills have usage in kWh (the latest one uses about 22% more at about the same
+// price per kWh); only the earlier Riverside bills have usage in gallons.
 export function buildSeedDocuments(today: string): Document[] {
   const d = (days: number) => addDays(today, days);
   // "September": tells earlier bills apart in titles and search.
@@ -23,6 +25,7 @@ export function buildSeedDocuments(today: string): Document[] {
       issueDate: d(-12),
       amount: 84.2,
       currency: "USD",
+      usage: { quantity: 412, unit: "kWh" },
       deadlines: [
         {
           date: d(9),
@@ -263,10 +266,11 @@ export function buildSeedDocuments(today: string): Document[] {
       issueDate: d(-42),
       amount: 70.1,
       currency: "USD",
+      usage: { quantity: 340, unit: "kWh" },
       deadlines: [],
-      summary: "Earlier monthly electricity bill for 351 kWh. Total $70.10. Paid.",
+      summary: "Earlier monthly electricity bill for 340 kWh. Total $70.10. Paid.",
       actionItems: [],
-      rawText: `SAMPLE - Brightwave Energy. Electricity bill. Account BW-4471-2209. Issued ${d(-42)}. Usage: 351 kWh. Amount due: $70.10. Due date: ${d(-21)}. Status: paid.`,
+      rawText: `SAMPLE - Brightwave Energy. Electricity bill. Account BW-4471-2209. Issued ${d(-42)}. Usage: 340 kWh. Amount due: $70.10. Due date: ${d(-21)}. Status: paid.`,
     },
     {
       ...base,
@@ -277,10 +281,11 @@ export function buildSeedDocuments(today: string): Document[] {
       issueDate: d(-73),
       amount: 68.4,
       currency: "USD",
+      usage: { quantity: 336, unit: "kWh" },
       deadlines: [],
-      summary: "Earlier monthly electricity bill for 342 kWh. Total $68.40. Paid.",
+      summary: "Earlier monthly electricity bill for 336 kWh. Total $68.40. Paid.",
       actionItems: [],
-      rawText: `SAMPLE - Brightwave Energy. Electricity bill. Account BW-4471-2209. Issued ${d(-73)}. Usage: 342 kWh. Amount due: $68.40. Due date: ${d(-52)}. Status: paid.`,
+      rawText: `SAMPLE - Brightwave Energy. Electricity bill. Account BW-4471-2209. Issued ${d(-73)}. Usage: 336 kWh. Amount due: $68.40. Due date: ${d(-52)}. Status: paid.`,
     },
     {
       ...base,
@@ -291,6 +296,7 @@ export function buildSeedDocuments(today: string): Document[] {
       issueDate: d(-30),
       amount: 55.9,
       currency: "USD",
+      usage: { quantity: 4100, unit: "gallons" },
       deadlines: [],
       summary: "Earlier water bill for 4,100 gallons. Total $55.90. Paid.",
       actionItems: [],
@@ -305,6 +311,7 @@ export function buildSeedDocuments(today: string): Document[] {
       issueDate: d(-61),
       amount: 54.3,
       currency: "USD",
+      usage: { quantity: 3950, unit: "gallons" },
       deadlines: [],
       summary: "Earlier water bill for 3,950 gallons. Total $54.30. Paid.",
       actionItems: [],

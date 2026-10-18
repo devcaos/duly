@@ -201,7 +201,7 @@ const mcpHandler = createMcpHandler(
       {
         title: "Compare bills",
         description:
-          "Compare the latest bill from a company with its earlier bills: the difference and percentage vs the previous bill and vs the usual (average) amount. Use it for \"is my electricity bill higher than usual?\", \"compare my Brightwave bill\" or \"how does my water bill compare?\". Give the company in issuer or keywords in query; leave both out to compare every company's bills.",
+          "Compare the latest bill from a company with its earlier bills: the difference and percentage vs the previous bill and vs the usual (average) amount, plus usage and price per unit when the bills state them. Use it for \"is my electricity bill higher than usual?\", \"compare my Brightwave bill\" or \"how does my water bill compare?\". Give the company in issuer or keywords in query; leave both out to compare every company's bills.",
         inputSchema: z.object({
           query: shortText().optional().describe("Keywords for the bill, e.g. 'electricity' or 'water bill'."),
           issuer: shortText().optional().describe("Who sent the bill, e.g. 'Brightwave Energy'."),
