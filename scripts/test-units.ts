@@ -10,12 +10,14 @@ import { forbiddenHostResponse } from "../lib/hosts";
 import { allowRequest, MAX_TRACKED_KEYS } from "../lib/rateLimit";
 import { searchDocuments } from "../lib/search";
 import { limitSentences } from "../lib/speech";
+import { setLlmForTests } from "../lib/llm";
+import type { LlmAdapter } from "../lib/llm";
 import { getStorage, HOUSEHOLD_ID } from "../lib/storage";
 import { buildSeedDocuments } from "../lib/storage/seed";
 import { runCheckWarranty } from "../lib/tools/checkWarranty";
 import { fromItem, toItem } from "../lib/storage/aws";
 import { compareIssuerBills, isNoticeablyHigher, runCompareBills, usageSentence } from "../lib/tools/compareBills";
-import { findProblems, isDisputeIntent, templateDraft } from "../lib/tools/draftReply";
+import { DISPUTE_RULE, findProblems, isDisputeIntent, runDraftReply, templateDraft } from "../lib/tools/draftReply";
 import { runListDeadlines } from "../lib/tools/listDeadlines";
 import { resolveDocument } from "../lib/tools/resolveDocument";
 import { runWeeklyBrief } from "../lib/tools/weeklyBrief";
@@ -337,6 +339,42 @@ check("draft_reply: dispute intents", () => {
   assert.equal(isDisputeIntent("Write a firm letter to Brightwave Energy disputing my bill."), true);
   assert.equal(isDisputeIntent("contest the parking fine"), true);
   assert.equal(isDisputeIntent("ask for a payment extension"), false);
+  // Negated: not a dispute.
+  assert.equal(isDisputeIntent("I'm not disputing the bill, ask for an extension"), false);
+  assert.equal(isDisputeIntent("don't contest it"), false);
+  assert.equal(isDisputeIntent("never dispute this"), false);
+});
+
+check("draft_reply: cautious phrases are not reasons, real reasons still are", () => {
+  const allowed = new Set(["84.2"]);
+  const dispute = { intent: DISPUTE, amount: 84.2 };
+  const start = "I dispute the $84.20 bill.";
+  for (const cautious of [
+    "Please correct any errors.",
+    "Please review it for any errors or mistakes.",
+    "Let me know if anything is wrong.",
+    "Please check for possible mistakes.",
+  ]) {
+    assert.deepEqual(findProblems(letter(`${start} ${cautious}`), allowed, [], dispute), [], cautious);
+  }
+  const error = findProblems(letter(`${start} There is an error in this bill.`), allowed, [], dispute);
+  assert.ok(error.some((p) => p.includes("reason I didn't give (error)")));
+});
+
+check("draft_reply: the user's own reason matches by stem", () => {
+  const allowed = new Set(["84.2"]);
+  const ownReason = { intent: "dispute the bill, it has errors", amount: 84.2 };
+  assert.deepEqual(findProblems(letter("I dispute the $84.20 bill: it has an error."), allowed, [], ownReason), []);
+  const overcharged = { intent: "dispute it, they are overcharging me", amount: 84.2 };
+  assert.deepEqual(findProblems(letter("I dispute the $84.20 bill. I was overcharged."), allowed, [], overcharged), []);
+  // Another word is still a reason.
+  const wrong = findProblems(letter("I dispute the $84.20 bill. It is wrong."), allowed, [], ownReason);
+  assert.ok(wrong.some((p) => p.includes("(wrong)")));
+});
+
+check('draft_reply: "I contest ..." says it disputes', () => {
+  const contest = { intent: "contest the parking fine", amount: 45 };
+  assert.deepEqual(findProblems(letter("I contest the $45 fine."), new Set(["45"]), [], contest), []);
 });
 
 check("draft_reply: the dispute amount matches with or without $, commas and trailing zeros", () => {
@@ -377,7 +415,7 @@ check("draft_reply: the template letter disputes the bill with its real amount a
   const refs = [{ label: "Account number", value: "BW-4471-2209" }];
   const replyBy = "October 25, 2026";
   const firm = templateDraft(brightwave, DISPUTE, "firm", refs, replyBy);
-  assert.match(firm.body, /^I dispute the \$84\.20 charge on Brightwave Energy electricity bill \(Account number BW-4471-2209\), dated [A-Z][a-z]+ \d{1,2}, \d{4}\./);
+  assert.match(firm.body, /^I dispute the \$84\.20 charge on your Brightwave Energy electricity bill \(Account number BW-4471-2209\), dated [A-Z][a-z]+ \d{1,2}, \d{4}\./);
   assert.match(firm.body, /itemized breakdown/);
   assert.match(firm.body, /Please reply in writing by October 25, 2026\.$/);
   assert.doesNotMatch(firm.body, /\b(error|incorrect|mistake|overcharg\w*|wrong|legal)\b/i);
@@ -385,7 +423,7 @@ check("draft_reply: the template letter disputes the bill with its real amount a
   // It passes the validator's dispute checks itself.
   const dispute = { intent: DISPUTE, amount: 84.2 };
   assert.equal(findProblems(firm, new Set(["84.2"]), refs, dispute).filter((p) => !p.startsWith("It contains figures")).length, 0);
-  assert.match(templateDraft(brightwave, DISPUTE, "polite", refs, replyBy).body, /^I would like to dispute the \$84\.20 charge/);
+  assert.match(templateDraft(brightwave, DISPUTE, "polite", refs, replyBy).body, /^I would like to dispute the \$84\.20 charge on your /);
   // The agent's fallback passes the whole message as the intent.
   const whole = templateDraft(brightwave, "Write a reply to Brightwave Energy disputing my electricity bill.", "firm", refs, replyBy);
   assert.equal(whole.body, firm.body);
@@ -505,6 +543,33 @@ async function storageChecks() {
     assert.equal(hasPrev(brief.deadlines.map((d) => d.documentId)), false);
     assert.equal(limitSentences(text, 99), limitSentences(text, 3), "more than 3 sentences");
     assert.match(text, /^In the next 7 days: cancel PeakFit/);
+  });
+
+  await checkAsync("draft_reply with a simulated LLM: the dispute rule only for disputes", async () => {
+    // Records every prompt and answers like Nova would, from the goal in the prompt.
+    const prompts: string[] = [];
+    const fake: LlmAdapter = {
+      async generateJson<T>({ prompt }: { prompt: string }): Promise<T> {
+        prompts.push(prompt);
+        const body = prompt.includes(DISPUTE_RULE)
+          ? "I dispute the $84.20 bill.\n\nPlease review it and send me an itemized breakdown."
+          : "I am requesting more time to pay the $84.20 bill.";
+        return { subject: "Brightwave bill", body } as T;
+      },
+    };
+    setLlmForTests(fake);
+    try {
+      await runDraftReply({ issuer: "Brightwave Energy", intent: "ask for a payment extension", tone: "firm" });
+      assert.equal(prompts.length, 1);
+      assert.equal(prompts[0].includes(DISPUTE_RULE), false);
+
+      const disputed = await runDraftReply({ issuer: "Brightwave Energy", intent: "dispute my electricity bill", tone: "firm" });
+      assert.ok(prompts.at(-1)!.includes(DISPUTE_RULE));
+      assert.match(disputed.structuredContent.body, /disput/i);
+      assert.match(disputed.structuredContent.body, /84\.20/);
+    } finally {
+      setLlmForTests(undefined);
+    }
   });
 
   // Last: it saves a document in the shared in-memory store.

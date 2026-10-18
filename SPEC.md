@@ -52,7 +52,7 @@ Out of scope for the hackathon: real payments, multi-user accounts, OAuth, email
 5. `draft_reply`
    - Input: `{ document_id?: string, query?: string, intent: string, tone?: "polite"|"firm" }`.
    - Output: subject + body draft referencing the document's numbers and dates.
-   - Dispute intent ("dispute", "contest"): the letter says plainly "I dispute ..." with the bill's amount and date, and asks for a review, a correction if needed and an itemized breakdown. Never a reason the user didn't give, no legal claims.
+   - Dispute intent ("dispute", "contest"): the letter says plainly "I dispute ..." with the bill's amount and date, and asks for a review, a correction if needed and an itemized breakdown. It never gives reasons, no legal claims.
 6. `search_documents` (helper)
    - Input: `{ query: string }`. Output: top matches (id, title, issuer, type).
 7. `compare_bills`

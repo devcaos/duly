@@ -27,6 +27,11 @@ export function getLlm(): LlmAdapter {
   return instance;
 }
 
+// Unit tests only: answer with a simulated LLM (undefined goes back to the env var choice).
+export function setLlmForTests(llm: LlmAdapter | undefined): void {
+  instance = llm;
+}
+
 function findProvider(envVar: string, name: string): NamedLlm {
   const provider = PROVIDERS[name];
   // A plain Error, not an LlmError: configuration details go to the server log only,

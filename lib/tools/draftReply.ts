@@ -51,19 +51,29 @@ const TONE_RULES: Record<Tone, (replyBy: string) => string> = {
 
 // "Dispute my electricity bill", "Write a firm letter ... disputing my bill", "contest the charge".
 const DISPUTE = /\b(disput\w*|contest\w*)\b/i;
+// "I'm not disputing the bill", "don't contest it": not a dispute.
+const NOT_DISPUTE = /\b(not|never)\s+(disput|contest)|n['’]t\s+(disput|contest)/i;
 
 export function isDisputeIntent(intent: string): boolean {
-  return DISPUTE.test(intent);
+  return DISPUTE.test(intent) && !NOT_DISPUTE.test(intent);
 }
 
 // Added to the prompt when the user disputes the bill: say it plainly, with no reasons.
-const DISPUTE_RULE = `The goal is to dispute this bill:
+export const DISPUTE_RULE = `The goal is to dispute this bill:
 - First sentence: say plainly that I dispute it, with the amount and the bill's date from the document (e.g. "I dispute the $X bill dated <date>").
 - Then ask them to review it, correct it if needed and send an itemized breakdown.
 - No reasons, no legal claims, no threats.`;
 
 // Words that say what is wrong with the bill: a reason the user never gave.
 const ERROR_WORDS = /\b(error|errors|incorrect|mistakes?|overcharg\w*|wrong)\b/gi;
+// Cautious phrases that give no reason: "correct any errors", "any errors or mistakes",
+// "if anything is wrong". Removed before looking for ERROR_WORDS.
+const CAUTIOUS = /\b(any|possible)\s+(errors?|mistakes?)(\s+or\s+(errors?|mistakes?))?\b|\bif\b[^.]*\b(wrong|incorrect)\b/gi;
+
+// "errors" and "error", "overcharged" and "overcharging" count as the same word.
+function stem(word: string): string {
+  return word.toLowerCase().replace(/^(overcharg)\w*/, "$1").replace(/s$/, "");
+}
 
 interface Reference {
   label: string; // "Account number"
@@ -201,15 +211,18 @@ export function findProblems(
   }
 
   if (dispute) {
-    if (!/\bdisput/i.test(draft.body)) {
+    if (!/\b(disput|contest)/i.test(draft.body)) {
       problems.push('It doesn\'t say plainly that I dispute the bill. Start with "I dispute ...".');
     }
     // Compared as values: "$84.20", "84.2" and "1,234.50" all match.
     if (dispute.amount !== undefined && !numbersIn(draft.body).has(String(dispute.amount))) {
       problems.push(`It doesn't mention the bill's amount (${dispute.amount}). Include it.`);
     }
-    const reasons = [...new Set([...draft.body.matchAll(ERROR_WORDS)].map((m) => m[0].toLowerCase()))].filter(
-      (word) => !new RegExp(`\\b${word}\\b`, "i").test(dispute.intent),
+    // The user's own words may be repeated ("errors" in the intent also allows "error").
+    const said = new Set([...dispute.intent.matchAll(ERROR_WORDS)].map((m) => stem(m[0])));
+    const written = draft.body.replace(CAUTIOUS, "");
+    const reasons = [...new Set([...written.matchAll(ERROR_WORDS)].map((m) => m[0].toLowerCase()))].filter(
+      (word) => !said.has(stem(word)),
     );
     if (reasons.length > 0) {
       problems.push(`It gives a reason I didn't give (${reasons.join(", ")}). Remove it: only say that I dispute the bill.`);
@@ -279,7 +292,8 @@ export function templateDraft(
   const { deadline, amount, currency } = billAmount(doc);
   if (isDisputeIntent(intent)) {
     // Never built from the intent's words: it may be the whole message ("Write a reply ...").
-    const charge = amount === undefined ? `the charges on ${about}` : `the ${formatMoney(amount, currency)} charge on ${about}`;
+    const charge =
+      amount === undefined ? `the charges on your ${about}` : `the ${formatMoney(amount, currency)} charge on your ${about}`;
     const dated = doc.issueDate ? `, dated ${formatLongDate(doc.issueDate)}` : "";
     const body =
       tone === "firm"

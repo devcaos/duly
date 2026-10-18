@@ -7,7 +7,8 @@
 // Routes: model = Nova picked the tool; forced-keyword / forced-any = Nova answered in text and
 // was asked again requiring a tool; server-default = the server called the tool itself.
 // Exit code 1 if any question gets the wrong tool, the wrong document or a wrong reply, or if a
-// dispute letter fails its letter check (counted separately from the routing).
+// dispute letter fails its letter check (counted separately from the routing; skipped when the
+// routing already failed). "letter: OK (template)" means the server's fallback letter, not Nova's.
 // Questions about a bill must use the latest bill, never an earlier one ("-prev-" ids).
 // Never reads or prints environment values.
 
@@ -90,21 +91,30 @@ function mainTool(turn) {
 
 let failures = 0;
 const routes = {};
-const letters = { checked: 0, failed: 0 };
+const letters = { checked: 0, failed: 0, skipped: 0 };
 
 // The Brightwave bill's amount, compared as a value ("$84.20", "84.2").
 const BRIGHTWAVE_AMOUNT = 84.2;
+// Same rules as lib/tools/draftReply.ts: cautious phrases ("correct any errors") give no reason.
 const ERROR_WORDS = /\b(error|errors|incorrect|mistakes?|overcharg\w*|wrong)\b/i;
+const CAUTIOUS = /\b(any|possible)\s+(errors?|mistakes?)(\s+or\s+(errors?|mistakes?))?\b|\bif\b[^.]*\b(wrong|incorrect)\b/gi;
+// The server's template letter (firm or polite), as built by templateDraft().
+const TEMPLATE_LETTER =
+  /^Dear [^\n]+\n\n(I dispute|I would like to dispute) the (\S+ charge|charges) on your [^\n]+\.\n\n(Please|Could you please) review this bill, correct it if needed, and send me an itemized breakdown/;
+
+function draftBody(result) {
+  return result.cards.find((card) => card.kind === "draft")?.data.body;
+}
 
 // What's wrong with a dispute letter (empty when it's fine).
 function letterProblems(result) {
-  const body = result.cards.find((card) => card.kind === "draft")?.data.body;
+  const body = draftBody(result);
   if (typeof body !== "string") return ["no draft card"];
   const problems = [];
-  if (!/\bdisput/i.test(body)) problems.push("doesn't say it disputes the bill");
+  if (!/\b(disput|contest)/i.test(body)) problems.push("doesn't say it disputes the bill");
   const numbers = body.replace(/(\d),(\d)/g, "$1$2").match(/\d+(?:\.\d+)?/g) ?? [];
   if (!numbers.some((n) => Number(n) === BRIGHTWAVE_AMOUNT)) problems.push(`no amount ${BRIGHTWAVE_AMOUNT}`);
-  const reason = body.match(ERROR_WORDS);
+  const reason = body.replace(CAUTIOUS, "").match(ERROR_WORDS);
   if (reason) problems.push(`gives a reason ("${reason[0]}")`);
   return problems;
 }
@@ -148,12 +158,17 @@ async function run(title, questions, keepHistory) {
     console.log(`  ${problems.length > 0 ? "FAIL" : "OK  "}  tool: ${tools}${tone}  route: ${result.route}${doc}`);
     if (problems.length > 0) console.log(`        ${problems.join("; ")}`);
     console.log(`  says: ${result.reply}`);
-    if (question.letter) {
+    if (question.letter && problems.length > 0) {
+      // Wrong tool or document: already a routing failure, so it isn't counted twice.
+      letters.skipped++;
+      console.log("  letter: skipped (routing failed)");
+    } else if (question.letter) {
       // Reported on its own line and counted apart: never a routing failure.
       const wrong = letterProblems(result);
       letters.checked++;
       if (wrong.length > 0) letters.failed++;
-      console.log(`  letter: ${wrong.length > 0 ? `FAIL (${wrong.join("; ")})` : "OK"}`);
+      const source = TEMPLATE_LETTER.test(draftBody(result)) ? " (template)" : "";
+      console.log(`  letter: ${wrong.length > 0 ? `FAIL (${wrong.join("; ")})` : "OK"}${source}`);
     }
 
     history = [...history, result.turn].slice(-MAX_HISTORY_TURNS);
@@ -170,5 +185,6 @@ const summary = Object.entries(routes)
   .map(([route, count]) => `${route}: ${count}`)
   .join(", ");
 console.log(`\n${total - failures}/${total} OK. Routes: ${summary || "none"}.`);
-console.log(`Letter checks: ${letters.checked - letters.failed}/${letters.checked}`);
+const skipped = letters.skipped > 0 ? ` (${letters.skipped} skipped)` : "";
+console.log(`Letter checks: ${letters.checked - letters.failed}/${letters.checked} OK${skipped}`);
 process.exit(failures > 0 || letters.failed > 0 ? 1 : 0);
