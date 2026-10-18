@@ -20,6 +20,7 @@ import {
   llmLimitPerMinute,
   requestLimitPerMinute,
 } from "@/lib/rateLimit";
+import { forbiddenHostResponse } from "@/lib/hosts";
 import { cleanSpoken } from "@/lib/speech";
 import {
   isoDateSchema as isoDate,
@@ -245,6 +246,12 @@ const mcpHandler = createMcpHandler(
 // Per-IP limit on every request to /api/mcp (see lib/rateLimit.ts), except the demo web's
 // internal calls (signed with DULY_INTERNAL_TOKEN), which /api/chat limits per user instead.
 async function handler(req: Request): Promise<Response> {
+  // Host allowlist (lib/hosts.ts), checked before anything reads the body. This is what blocks
+  // DNS rebinding: a rebinding page's browser sends the attacker's own hostname in Host, so the
+  // request is refused even though it reaches a local server. Origin is not enforced on purpose:
+  // server-side clients (Alexa+, Claude) send no Origin and must keep working.
+  const forbidden = forbiddenHostResponse(req);
+  if (forbidden) return forbidden;
   if (!isInternalRequest(req) && !allowRequest("all", getClientIp(req), requestLimitPerMinute())) {
     return Response.json(
       {

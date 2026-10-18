@@ -6,6 +6,7 @@ import assert from "node:assert/strict";
 import { keywordToolFor } from "../lib/agent/agent";
 import { canSendToken } from "../lib/agent/mcpClient";
 import { addDays, periodRange, todayISO } from "../lib/dates";
+import { forbiddenHostResponse } from "../lib/hosts";
 import { allowRequest, MAX_TRACKED_KEYS } from "../lib/rateLimit";
 import { searchDocuments } from "../lib/search";
 import { limitSentences } from "../lib/speech";
@@ -91,6 +92,83 @@ check("a target host different from the request host does not get the token", ()
 check("MCP_URL no longer extends the allowlist", () => {
   withEnv({ ...NO_VERCEL, MCP_URL: "https://mcp.example.com/api/mcp" }, () => {
     assert.equal(canSendToken("https://mcp.example.com/api/mcp", "https://mcp.example.com/api/chat"), false);
+  });
+});
+
+check("MCP_ALLOWED_HOSTS does not extend the token allowlist", () => {
+  withEnv({ ...NO_VERCEL, MCP_ALLOWED_HOSTS: "duly-home.vercel.app" }, () => {
+    const host = "https://duly-home.vercel.app";
+    assert.equal(canSendToken(`${host}/api/mcp`, `${host}/api/chat`), false);
+  });
+});
+
+// Host check on /api/mcp: forbiddenHostResponse(req) is undefined when the host is allowed.
+const NO_HOSTS = { ...NO_VERCEL, MCP_ALLOWED_HOSTS: undefined };
+
+function mcpRequest(host?: string): Request {
+  const headers = new Headers({ "content-type": "application/json" });
+  if (host !== undefined) headers.set("host", host);
+  return new Request("http://localhost/api/mcp", { method: "POST", headers, body: "{}" });
+}
+
+function hostAllowed(host?: string): boolean {
+  return forbiddenHostResponse(mcpRequest(host)) === undefined;
+}
+
+check("Host check: localhost, 127.0.0.1 and [::1] pass with and without port", () => {
+  withEnv(NO_HOSTS, () => {
+    for (const host of ["localhost", "localhost:3000", "127.0.0.1", "127.0.0.1:3100", "[::1]", "[::1]:3000"]) {
+      assert.equal(hostAllowed(host), true, host);
+    }
+  });
+});
+
+check("Host check: the deployment's preview and production hosts pass", () => {
+  withEnv(
+    {
+      ...NO_HOSTS,
+      VERCEL_URL: "duly-abc123-team.vercel.app",
+      VERCEL_BRANCH_URL: "duly-git-fix-team.vercel.app",
+      VERCEL_PROJECT_PRODUCTION_URL: "duly.vercel.app",
+    },
+    () => {
+      for (const host of ["duly-abc123-team.vercel.app", "duly-git-fix-team.vercel.app", "duly.vercel.app:443"]) {
+        assert.equal(hostAllowed(host), true, host);
+      }
+    },
+  );
+});
+
+check("Host check: MCP_ALLOWED_HOSTS adds custom domains and LAN IPs", () => {
+  withEnv({ ...NO_HOSTS, MCP_ALLOWED_HOSTS: " duly-home.vercel.app , https://duly.example.com/ ,192.168.1.20:3000," }, () => {
+    for (const host of ["duly-home.vercel.app", "duly.example.com", "192.168.1.20:3000", "192.168.1.20"]) {
+      assert.equal(hostAllowed(host), true, host);
+    }
+  });
+});
+
+check("Host check: uppercase and padded hosts pass", () => {
+  withEnv({ ...NO_HOSTS, MCP_ALLOWED_HOSTS: "duly-home.vercel.app" }, () => {
+    assert.equal(hostAllowed("Duly-Home.vercel.app"), true);
+    assert.equal(hostAllowed(" LOCALHOST:3000 "), true);
+  });
+});
+
+check("Host check: a foreign host gets 403 and the body is not read", () => {
+  withEnv({ ...NO_HOSTS, VERCEL_URL: "duly.vercel.app" }, () => {
+    for (const host of ["evil.example", "someone-else.vercel.app", "evil.com@localhost", "localhost/x", "localhost.evil.example"]) {
+      const req = mcpRequest(host);
+      const response = forbiddenHostResponse(req);
+      assert.equal(response?.status, 403, host);
+      assert.equal(req.bodyUsed, false, host);
+    }
+  });
+});
+
+check("Host check: a missing Host gets 403", () => {
+  withEnv(NO_HOSTS, () => {
+    assert.equal(forbiddenHostResponse(mcpRequest())?.status, 403);
+    assert.equal(forbiddenHostResponse(mcpRequest(""))?.status, 403);
   });
 });
 

@@ -1,5 +1,6 @@
 import { Client, ProtocolError, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import type { Tool } from "@modelcontextprotocol/client";
+import { ownHosts } from "@/lib/hosts";
 import { INTERNAL_TOKEN_HEADER, internalToken } from "@/lib/rateLimit";
 
 // The demo web talks to Duly exactly like Alexa+ would: as an MCP client of our own
@@ -51,16 +52,8 @@ async function connect({ url, sendToken }: McpTarget): Promise<Connection> {
 export function canSendToken(targetUrl: string, requestUrl: string): boolean {
   const target = new URL(targetUrl);
   if (target.host.toLowerCase() !== new URL(requestUrl).host.toLowerCase()) return false;
-  const allowed = new Set(["localhost", "127.0.0.1", "[::1]"]);
-  for (const value of [
-    process.env.VERCEL_URL,
-    process.env.VERCEL_BRANCH_URL,
-    process.env.VERCEL_PROJECT_PRODUCTION_URL,
-  ]) {
-    // These are bare hosts ("duly-git-main-team.vercel.app"), without a scheme.
-    if (value) allowed.add(value.toLowerCase().replace(/^https?:\/\//, "").replace(/[:/].*$/, ""));
-  }
-  return allowed.has(target.hostname.toLowerCase());
+  // ownHosts() on purpose, not allowedMcpHosts(): MCP_ALLOWED_HOSTS never receives the token.
+  return ownHosts().has(target.hostname.toLowerCase());
 }
 
 function getConnection(target: McpTarget): Promise<Connection> {
