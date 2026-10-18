@@ -14,6 +14,12 @@ export interface ToolCallResult {
   isError: boolean;
 }
 
+// Where to connect and whether this call may carry the internal token (see canSendToken).
+export interface McpTarget {
+  url: string;
+  sendToken: boolean;
+}
+
 interface Connection {
   client: Client;
   tools: Tool[];
@@ -22,14 +28,14 @@ interface Connection {
 // One connection per server instance, reused across requests. The Duly server is
 // stateless, so a connection never goes stale.
 let connection: Promise<Connection> | undefined;
-let connectedUrl: string | undefined;
+let connectedKey: string | undefined;
 
-async function connect(url: string): Promise<Connection> {
+async function connect({ url, sendToken }: McpTarget): Promise<Connection> {
   // "auto" speaks the 2026-07-28 protocol (one server/discover request instead of the
   // initialize handshake) and falls back to the 2025 handshake if the server is older.
   const client = new Client({ name: "duly-echo-web", version: "1.0.0" }, { versionNegotiation: { mode: "auto" } });
   // The internal token lets /api/mcp skip its per-IP limit: /api/chat limits each user itself.
-  const token = canSendToken(url) ? internalToken() : undefined;
+  const token = sendToken ? internalToken() : undefined;
   const transport = new StreamableHTTPClientTransport(new URL(url), {
     requestInit: token ? { headers: { [INTERNAL_TOKEN_HEADER]: token } } : undefined,
   });
@@ -38,12 +44,13 @@ async function connect(url: string): Promise<Connection> {
   return { client, tools };
 }
 
-// The MCP URL always uses the host of the incoming request (so Vercel Authentication on
-// deployment URLs never gets in the way), but the secret is only attached for hosts that are
-// certainly ours: this deployment's own Vercel hosts, localhost, or an explicitly set MCP_URL.
-// Any other host, including other *.vercel.app hosts, gets the request without the token.
-export function canSendToken(url: string): boolean {
-  const host = new URL(url).hostname.toLowerCase();
+// The token is a secret, so it is only attached when the MCP server is certainly this same
+// deployment: the target host must equal the host of the incoming request AND be one of this
+// deployment's own Vercel hosts or localhost. An MCP_URL that points anywhere else, and any other
+// *.vercel.app host, gets the request without the token.
+export function canSendToken(targetUrl: string, requestUrl: string): boolean {
+  const target = new URL(targetUrl);
+  if (target.host.toLowerCase() !== new URL(requestUrl).host.toLowerCase()) return false;
   const allowed = new Set(["localhost", "127.0.0.1", "[::1]"]);
   for (const value of [
     process.env.VERCEL_URL,
@@ -53,14 +60,16 @@ export function canSendToken(url: string): boolean {
     // These are bare hosts ("duly-git-main-team.vercel.app"), without a scheme.
     if (value) allowed.add(value.toLowerCase().replace(/^https?:\/\//, "").replace(/[:/].*$/, ""));
   }
-  if (process.env.MCP_URL) allowed.add(new URL(process.env.MCP_URL).hostname.toLowerCase());
-  return allowed.has(host);
+  return allowed.has(target.hostname.toLowerCase());
 }
 
-function getConnection(url: string): Promise<Connection> {
-  if (!connection || connectedUrl !== url) {
-    connectedUrl = url;
-    connection = connect(url);
+function getConnection(target: McpTarget): Promise<Connection> {
+  // The token decision is part of the key, so a connection with the token is never reused
+  // for a call that must go without it.
+  const key = `${target.url}|${target.sendToken}`;
+  if (!connection || connectedKey !== key) {
+    connectedKey = key;
+    connection = connect(target);
     // A failed connection must not be cached.
     connection.catch(() => {
       connection = undefined;
@@ -78,27 +87,27 @@ async function resetConnection() {
 
 // Runs fn with a connected client. If the transport fails (e.g. the server restarted),
 // reconnects once and tries again. A JSON-RPC error from the server is not retried.
-async function withConnection<T>(url: string, fn: (c: Connection) => Promise<T>): Promise<T> {
+async function withConnection<T>(target: McpTarget, fn: (c: Connection) => Promise<T>): Promise<T> {
   try {
-    return await fn(await getConnection(url));
+    return await fn(await getConnection(target));
   } catch (error) {
     if (error instanceof ProtocolError) throw error;
     console.warn(`[chat] MCP call failed, reconnecting (${error instanceof Error ? error.message : error})`);
     await resetConnection();
-    return fn(await getConnection(url));
+    return fn(await getConnection(target));
   }
 }
 
-export function listMcpTools(url: string): Promise<Tool[]> {
-  return withConnection(url, async (c) => c.tools);
+export function listMcpTools(target: McpTarget): Promise<Tool[]> {
+  return withConnection(target, async (c) => c.tools);
 }
 
 export async function callMcpTool(
-  url: string,
+  target: McpTarget,
   name: string,
   input: Record<string, unknown>,
 ): Promise<ToolCallResult> {
-  const result = await withConnection(url, (c) => c.client.callTool({ name, arguments: input }));
+  const result = await withConnection(target, (c) => c.client.callTool({ name, arguments: input }));
   const firstText = result.content.find((block) => block.type === "text");
   return {
     name,

@@ -24,7 +24,7 @@ Open the app's home page (`/`, or http://localhost:3000 with `npm run dev`). It 
 
 How it works: [`app/api/chat/route.ts`](app/api/chat/route.ts) asks Amazon Bedrock (Converse API with tool use, model `BEDROCK_MODEL_ID`) which Duly tool to call and with which arguments. The app is an **MCP client of Duly's own `/api/mcp`** ([`lib/agent/mcpClient.ts`](lib/agent/mcpClient.ts), official MCP TypeScript SDK, Streamable HTTP): it lists the tools over MCP, hands them to the model, and calls the chosen tool over MCP, the same way Alexa+ would. What Alexa says is the tool's own spoken sentence; the model never writes the reply, so it can't leak ids or JSON or claim actions it didn't take. If the model answers with text instead of choosing a tool, the app asks once more with `toolChoice: any` (a tool call is required) before giving a help sentence. A safety filter ([`lib/speech.ts`](lib/speech.ts)) still removes ids and JSON and turns ISO dates into spoken dates. The home screen's "Coming up" list, uploads and the **Make it firmer** button call `list_deadlines`, `add_document` and `draft_reply` directly, without the model (a model can't copy a whole file into a tool call). Replies go through [`app/api/speak/route.ts`](app/api/speak/route.ts) (Polly). Set `MCP_URL` to point the app at another Duly server.
 
-Rate limits: `/api/chat` and `/api/speak` limit each visitor by IP. Set `DULY_INTERNAL_TOKEN` (see `.env.example`) so the app's own calls to `/api/mcp` skip the per-IP limit there; without it, every visitor shares the server's IP bucket on `/api/mcp`. The internal call always goes to the host the visitor used, but the token is only attached when that host is this deployment's own (`VERCEL_URL`, `VERCEL_BRANCH_URL` or `VERCEL_PROJECT_PRODUCTION_URL`), `localhost`, or the host of an explicitly set `MCP_URL`; never to any other host. If you serve production from a domain that isn't in those variables, set `MCP_URL` to it.
+Rate limits: `/api/chat` and `/api/speak` limit each visitor by IP. Set `DULY_INTERNAL_TOKEN` (see `.env.example`) so the app's own calls to `/api/mcp` skip the per-IP limit there; without it, every visitor shares the server's IP bucket on `/api/mcp`. The internal call goes to the host the visitor used, and the token is only attached when that host is this deployment's own (`VERCEL_URL`, `VERCEL_BRANCH_URL` or `VERCEL_PROJECT_PRODUCTION_URL`) or `localhost`. An `MCP_URL` that points to any other host is called without the token (so it uses that server's normal per-IP limit); setting `MCP_URL` never makes the app send the secret elsewhere. The in-memory limiter tracks at most 10,000 keys; when it is full, expired keys go first and then the oldest.
 
 ### MCP Inspector
 
@@ -54,6 +54,10 @@ Then ask, for example:
 - "When does the car insurance renew?"
 
 Duly explains documents; it does not give legal or financial advice.
+
+### Known limitations
+
+- Explanations are grounded by prompt rules (the model is told to use only the document's own facts), not by a full fact validator.
 
 ## AWS integration
 

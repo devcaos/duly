@@ -1,6 +1,8 @@
 import { z } from "zod";
 import { runAgent, runDirectTool } from "@/lib/agent/agent";
 import { DIRECT_TOOLS, MAX_HISTORY_TURNS, MAX_MESSAGE_CHARS } from "@/lib/agent/types";
+import { canSendToken } from "@/lib/agent/mcpClient";
+import type { McpTarget } from "@/lib/agent/mcpClient";
 import { LlmError } from "@/lib/llm";
 import { summarizeError } from "@/lib/aws";
 import { allowRequest, getClientIp, llmLimitPerMinute, requestLimitPerMinute } from "@/lib/rateLimit";
@@ -51,16 +53,31 @@ const DIRECT_USER_TEXT: Record<(typeof DIRECT_TOOLS)[number], string> = {
   draft_reply: "Make it firmer.",
 };
 
-// Our own MCP endpoint. MCP_URL overrides it (e.g. to test the deployed server).
-function mcpUrl(req: Request): string {
-  return process.env.MCP_URL || new URL("/api/mcp", req.url).toString();
+// Our own MCP endpoint. MCP_URL overrides it (e.g. to test the deployed server). The internal
+// token only goes along when the target is this same deployment (see canSendToken).
+function mcpTarget(req: Request): McpTarget {
+  const url = process.env.MCP_URL || new URL("/api/mcp", req.url).toString();
+  return { url, sendToken: canSendToken(url, req.url) };
 }
 
 function errorResponse(message: string, status: number) {
   return Response.json({ error: message }, { status });
 }
 
+function tooManyRequests() {
+  return errorResponse("You've asked a lot in the last minute. Please wait a moment.", 429);
+}
+
 export async function POST(req: Request): Promise<Response> {
+  // Limits first: nothing is read or parsed for a visitor who is over the limit. This general
+  // limit covers every request; LLM requests also get the stricter one below, once the body
+  // shows what they are.
+  const ip = getClientIp(req);
+  if (!allowRequest("chat-all", ip, requestLimitPerMinute())) return tooManyRequests();
+  if (Number(req.headers.get("content-length") ?? 0) > MAX_BODY_CHARS) {
+    return errorResponse("That file is too big. The limit is 3 MB.", 413);
+  }
+
   const raw = await req.text();
   if (raw.length > MAX_BODY_CHARS) return errorResponse("That file is too big. The limit is 3 MB.", 413);
 
@@ -78,17 +95,16 @@ export async function POST(req: Request): Promise<Response> {
   // These limits use the visitor's own IP; the calls to /api/mcp below carry the internal
   // token so they don't count against the server's shared IP there.
   const usesLlm = "message" in body || body.call.name !== "list_deadlines";
-  const allowed = usesLlm
-    ? allowRequest("chat", getClientIp(req), llmLimitPerMinute())
-    : allowRequest("chat-read", getClientIp(req), requestLimitPerMinute());
-  if (!allowed) return errorResponse("You've asked a lot in the last minute. Please wait a moment.", 429);
+  if (usesLlm && !allowRequest("chat", ip, llmLimitPerMinute())) return tooManyRequests();
+
+  const target = mcpTarget(req);
 
   try {
     if ("message" in body) {
-      return Response.json(await runAgent(mcpUrl(req), body.message, body.history));
+      return Response.json(await runAgent(target, body.message, body.history));
     }
     const userText = DIRECT_USER_TEXT[body.call.name];
-    return Response.json(await runDirectTool(mcpUrl(req), body.call.name, body.call.arguments, userText));
+    return Response.json(await runDirectTool(target, body.call.name, body.call.arguments, userText));
   } catch (error) {
     if (error instanceof LlmError) return errorResponse(error.message, 502);
     console.error(`[chat] failed (${summarizeError(error)})`);

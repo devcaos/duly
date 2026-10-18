@@ -216,6 +216,13 @@ async function handler(req: Request): Promise<Response> {
       { status: 429, headers: { "Retry-After": "60" } },
     );
   }
+  // The server is stateless and Duly's tool list never changes, so there is nothing to stream
+  // over a GET. Answer 405 right away instead of leaving a stream open until maxDuration.
+  // (subscriptions/listen is a POST of the 2026-07-28 protocol; the SDK closes it at once, see
+  // the capabilities note above.)
+  if (req.method === "GET") {
+    return new Response(null, { status: 405, headers: { Allow: "POST" } });
+  }
   return mcpHandler(req);
 }
 

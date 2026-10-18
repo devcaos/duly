@@ -14,6 +14,7 @@ import { bedrockModelId, createBedrockClient, toLlmError } from "@/lib/llm/bedro
 import { periodRange, todayISO } from "@/lib/dates";
 import { cleanSpoken } from "@/lib/speech";
 import { callMcpTool, listMcpTools } from "./mcpClient";
+import type { McpTarget } from "./mcpClient";
 import type { ToolCallResult } from "./mcpClient";
 import type { Card, CardKind, ChatResponse, ChatRoute, ChatTurn } from "./types";
 
@@ -58,6 +59,8 @@ const KEYWORD_TOOLS: [RegExp, string][] = [
 const FOLLOW_UP = /\b(it|this|that)\b/i;
 // "Make it firmer", "make it more polite": a new tone for the last draft.
 const REFINE_DRAFT = /\b(make it|firmer|more polite)\b/i;
+// The message is about paying, so list_deadlines should only return deadlines with an amount.
+const PAYING = /\b(pay|paying|owe|bills?|amount|cost)\b/i;
 
 // Said when the model picks no tool (small talk, unrelated questions).
 const HELP_REPLY = "I can tell you what's due, explain a letter, check a warranty or draft a reply. What do you need?";
@@ -83,7 +86,7 @@ Rules:
 
 let bedrock: BedrockRuntimeClient | undefined;
 
-export async function runAgent(mcpUrl: string, message: string, history: ChatTurn[]): Promise<ChatResponse> {
+export async function runAgent(mcpUrl: McpTarget, message: string, history: ChatTurn[]): Promise<ChatResponse> {
   const mcpTools = await listMcpTools(mcpUrl);
   const toolNames = new Set(mcpTools.map((tool) => tool.name));
   const keywordTool = KEYWORD_TOOLS.find(([pattern, name]) => pattern.test(message) && toolNames.has(name))?.[1];
@@ -198,7 +201,8 @@ function defaultInput(tool: string, message: string, history: ChatTurn[]): Recor
         : /\bthis month\b/i.test(message)
           ? periodRange("month")
           : {};
-      return { payable: true, ...period };
+      // Only questions about paying get the payable filter; "what's due this week?" lists everything.
+      return PAYING.test(message) ? { payable: true, ...period } : period;
     }
     case "explain_document": {
       const documentId = FOLLOW_UP.test(message) ? earlierTools.findLast((t) => t.documentId)?.documentId : undefined;
@@ -235,7 +239,7 @@ function logRoute(tool: string | undefined, route: ChatRoute, notes: string[]) {
 
 // The page calls list_deadlines, add_document and draft_reply ("Make it firmer") directly.
 export async function runDirectTool(
-  mcpUrl: string,
+  mcpUrl: McpTarget,
   name: string,
   input: Record<string, unknown>,
   userText: string,
@@ -279,7 +283,7 @@ function cardsFor(calls: ToolCallResult[]): Card[] {
   return main.length > 0 ? main : cards;
 }
 
-async function safeCallTool(mcpUrl: string, name: string, input: Record<string, unknown>): Promise<ToolCallResult> {
+async function safeCallTool(mcpUrl: McpTarget, name: string, input: Record<string, unknown>): Promise<ToolCallResult> {
   try {
     return await callMcpTool(mcpUrl, name, input);
   } catch (error) {

@@ -6,7 +6,8 @@ import { timingSafeEqual } from "node:crypto";
 // That's acceptable for the demo; a shared store would be needed for production.
 
 const WINDOW_MS = 60_000;
-const MAX_TRACKED_KEYS = 10_000;
+// Hard cap on tracked keys, so a flood of different IPs can't grow the map without limit.
+export const MAX_TRACKED_KEYS = 10_000;
 
 // key ("<bucket>:<ip>") -> timestamps of recent hits
 const hits = new Map<string, number[]>();
@@ -38,9 +39,9 @@ export function getClientIp(req?: Request): string {
 // Records one hit and returns false if the limit for this minute is exceeded.
 export function allowRequest(bucket: string, ip: string, limit: number): boolean {
   const now = Date.now();
-  if (hits.size > MAX_TRACKED_KEYS) removeExpired(now);
-
   const key = `${bucket}:${ip}`;
+  if (!hits.has(key) && hits.size >= MAX_TRACKED_KEYS) makeRoom(now);
+
   const recent = (hits.get(key) ?? []).filter((t) => now - t < WINDOW_MS);
   if (recent.length >= limit) {
     hits.set(key, recent);
@@ -51,9 +52,15 @@ export function allowRequest(bucket: string, ip: string, limit: number): boolean
   return true;
 }
 
-function removeExpired(now: number) {
+// Frees space for one new key: drops expired keys first and, if the map is still full, the
+// oldest ones (a Map iterates in insertion order).
+function makeRoom(now: number) {
   for (const [key, times] of hits) {
     if (times.every((t) => now - t >= WINDOW_MS)) hits.delete(key);
+  }
+  for (const key of hits.keys()) {
+    if (hits.size < MAX_TRACKED_KEYS) break;
+    hits.delete(key);
   }
 }
 

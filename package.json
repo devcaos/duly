@@ -7,6 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "test:unit": "tsx scripts/test-units.ts",
     "tools": "node scripts/call-tools.mjs",
     "smoke:bedrock": "node scripts/smoke-bedrock.mjs",
     "samples": "node scripts/generate-samples.mjs",
