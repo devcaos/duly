@@ -11,6 +11,8 @@ import { runSearchDocuments, searchDocumentsOutput } from "@/lib/tools/searchDoc
 import { addDocumentOutput, runAddDocument } from "@/lib/tools/addDocument";
 import { explainDocumentOutput, runExplainDocument } from "@/lib/tools/explainDocument";
 import { draftReplyOutput, runDraftReply, TONES } from "@/lib/tools/draftReply";
+import { compareBillsOutput, runCompareBills } from "@/lib/tools/compareBills";
+import { DEFAULT_BRIEF_DAYS, MAX_BRIEF_DAYS, runWeeklyBrief, weeklyBriefOutput } from "@/lib/tools/weeklyBrief";
 import {
   allowRequest,
   getClientIp,
@@ -193,9 +195,46 @@ const mcpHandler = createMcpHandler(
       },
       async (input) => runTool(() => runSearchDocuments(input)),
     );
+
+    server.registerTool(
+      "compare_bills",
+      {
+        title: "Compare bills",
+        description:
+          "Compare the latest bill from a company with its earlier bills: the difference and percentage vs the previous bill and vs the usual (average) amount. Use it for \"is my electricity bill higher than usual?\", \"compare my Brightwave bill\" or \"how does my water bill compare?\". Give the company in issuer or keywords in query; leave both out to compare every company's bills.",
+        inputSchema: z.object({
+          query: shortText().optional().describe("Keywords for the bill, e.g. 'electricity' or 'water bill'."),
+          issuer: shortText().optional().describe("Who sent the bill, e.g. 'Brightwave Energy'."),
+        }),
+        outputSchema: compareBillsOutput,
+        annotations: { readOnlyHint: true },
+      },
+      async (input) => runTool(() => runCompareBills(input)),
+    );
+
+    server.registerTool(
+      "weekly_brief",
+      {
+        title: "Weekly brief",
+        description:
+          "A short brief of what needs attention soon, most urgent first: deadlines with amounts, renewals that can still be cancelled, warranties ending within 60 days and bills noticeably higher than usual. Use it for \"give me my weekly brief\", \"what's my week looking like?\" or \"summarize my week\". Covers the next 7 days unless days is given.",
+        inputSchema: z.object({
+          days: z
+            .number()
+            .int()
+            .min(1)
+            .max(MAX_BRIEF_DAYS)
+            .optional()
+            .describe(`How many days ahead to cover. Default: ${DEFAULT_BRIEF_DAYS}.`),
+        }),
+        outputSchema: weeklyBriefOutput,
+        annotations: { readOnlyHint: true },
+      },
+      async (input) => runTool(() => runWeeklyBrief(input)),
+    );
   },
   {
-    serverInfo: { name: "duly", version: "0.2.0" },
+    serverInfo: { name: "duly", version: "0.3.0" },
     // Duly's tool list never changes. Advertising listChanged: false makes the SDK answer a
     // 2026-07-28 `subscriptions/listen` request and close its SSE stream right away. With the
     // default (true) the stream stays open forever and Vercel kills it after maxDuration.
