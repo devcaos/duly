@@ -33,6 +33,8 @@ const CARD_FOR_TOOL: Record<string, CardKind> = {
   draft_reply: "draft",
   explain_document: "explanation",
   search_documents: "matches",
+  compare_bills: "comparison",
+  weekly_brief: "brief",
 };
 
 // Files only arrive through the upload button, so the model never sees these fields.
@@ -42,18 +44,33 @@ const MODEL_HIDDEN_FIELDS = ["file_base64", "mime_type"];
 // lengths and the like are left out; the MCP server still validates the full zod schema.
 const NOVA_SCHEMA_KEYS = new Set(["type", "description", "properties", "required", "enum", "items"]);
 
-// "Explain the parking fine letter", "what does it mean", "what happens if I ignore it".
-const EXPLAIN_REQUEST = /\b(explain|mean|means|meaning|ignore|what is this|what's this)\b/i;
+// "Explain the parking fine letter", "what does it mean", "what happens if I ignore it",
+// "summarize my insurance letter".
+const EXPLAIN_REQUEST =
+  /\b(explain|mean|means|meaning|ignore|what is this|what's this|summary|summarize|summarise)\b/i;
+
+// "Give me my weekly brief", "summarize my week". "Summary" alone isn't enough ("summarize this
+// letter" is an explanation), and neither is "week" ("what's due this week?" is a deadline list).
+const WEEKLY_BRIEF_REQUEST =
+  /\b(brief|briefing|weekly|overview)\b|\bsummar(?:y|ize|ise)\b.*\bweek\b|\bweek\b.*\bsummar(?:y|ize|ise)\b/i;
 
 // The tool a message's keywords point to. Action intents come before topics: "write a reply
 // about my dishwasher warranty" is a draft, "explain my electricity bill" an explanation.
 // "letter" alone isn't a draft keyword, or "explain the parking fine letter" would be a draft.
+// compare_bills comes before list_deadlines, or "is my bill higher than usual?" would be a list.
 const KEYWORD_TOOLS: [RegExp, string][] = [
   [/\b(reply|draft|write|firmer|polite)\b/i, "draft_reply"],
+  [WEEKLY_BRIEF_REQUEST, "weekly_brief"],
   [EXPLAIN_REQUEST, "explain_document"],
   [/\b(warranty|warranties|guarantee)\b/i, "check_warranty"],
+  [/\b(compare|compared|comparison|higher|lower|usual|normal)\b/i, "compare_bills"],
   [/\b(pay|owe|due|bills?|deadlines?|renew|renews|renewal)\b/i, "list_deadlines"],
 ];
+
+// The keyword tool for a message, among the tools the server offers (all of them by default).
+export function keywordToolFor(message: string, toolNames?: Set<string>): string | undefined {
+  return KEYWORD_TOOLS.find(([pattern, name]) => pattern.test(message) && (!toolNames || toolNames.has(name)))?.[1];
+}
 
 // The message talks about the document from the previous turn ("what does it mean?").
 const FOLLOW_UP = /\b(it|this|that)\b/i;
@@ -63,7 +80,8 @@ const REFINE_DRAFT = /\b(make it|firmer|more polite)\b/i;
 const PAYING = /\b(pay|paying|owe|bills?|amount|cost)\b/i;
 
 // Said when the model picks no tool (small talk, unrelated questions).
-const HELP_REPLY = "I can tell you what's due, explain a letter, check a warranty or draft a reply. What do you need?";
+const HELP_REPLY =
+  "I can tell you what's due, give you a weekly brief, compare your bills, explain a letter, check a warranty or draft a reply. What do you need?";
 
 function systemPrompt(): string {
   const today = todayISO();
@@ -78,6 +96,8 @@ Rules:
 - Periods for list_deadlines: "this month" = from ${month.from} to ${month.to}; "this week" = from ${week.from} to ${week.to}. With no period, leave from and to out (next 30 days).
 - "Explain the ... letter", "what does it mean?", "what happens if I ignore it?": call explain_document with keywords in "query" (or the sender in "issuer"). Never call search_documents for this.
 - "Is my <product> under warranty?": check_warranty with product. "Which warranties are still active?", "my warranties": check_warranty without product.
+- "Is my <company> bill higher than usual?", "compare my electricity bill": compare_bills with issuer or query. "Are any of my bills higher than usual?": compare_bills without arguments.
+- "Give me my weekly brief", "what's my week looking like?", "summarize my week": weekly_brief (days only if the user says how many).
 - Use search_documents only when the user asks to find or list documents.
 - explain_document, draft_reply and check_warranty find the document themselves from "query" (e.g. "parking notice"); you don't need search_documents first.
 - To change a draft ("make it firmer", "make it more polite"), call draft_reply again with the same document_id and intent from the earlier call and the new tone.
@@ -89,7 +109,7 @@ let bedrock: BedrockRuntimeClient | undefined;
 export async function runAgent(mcpUrl: McpTarget, message: string, history: ChatTurn[]): Promise<ChatResponse> {
   const mcpTools = await listMcpTools(mcpUrl);
   const toolNames = new Set(mcpTools.map((tool) => tool.name));
-  const keywordTool = KEYWORD_TOOLS.find(([pattern, name]) => pattern.test(message) && toolNames.has(name))?.[1];
+  const keywordTool = keywordToolFor(message, toolNames);
 
   const messages: Message[] = [
     ...history.flatMap((turn, i) => turnToMessages(turn, i, toolNames)),
@@ -195,6 +215,10 @@ function defaultInput(tool: string, message: string, history: ChatTurn[]): Recor
   switch (tool) {
     case "check_warranty":
       return {}; // every warranty with its status
+    case "compare_bills":
+      return { query: message }; // generic words are ignored: "my bills" compares them all
+    case "weekly_brief":
+      return {}; // the next 7 days
     case "list_deadlines": {
       const period = /\bthis week\b/i.test(message)
         ? periodRange("week")

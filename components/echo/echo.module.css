@@ -859,6 +859,28 @@
   font-size: 12.5px;
 }
 
+/* ---------- Bill comparison and weekly brief ---------- */
+
+.billPill {
+  margin-top: 10px;
+}
+
+.billRow {
+  margin-top: 16px;
+}
+
+.billRow .barLabels {
+  margin-top: 0;
+}
+
+.billRow .bar {
+  margin-top: 6px;
+}
+
+.briefHeading {
+  margin: 8px 4px 0;
+}
+
 .capitalize {
   text-transform: capitalize;
 }

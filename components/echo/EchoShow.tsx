@@ -5,6 +5,8 @@ import type { CSSProperties, FormEvent } from "react";
 import { MAX_HISTORY_TURNS } from "@/lib/agent/types";
 import type { Card, ChatResponse, ChatTurn } from "@/lib/agent/types";
 import {
+  BriefCard,
+  ComparisonCard,
   DeadlineRow,
   DeadlinesCard,
   DocumentCard,
@@ -383,6 +385,10 @@ function CardView({ card, busy, onFirmer }: { card: Card; busy: boolean; onFirme
       return <ExplanationCard data={card.data} />;
     case "matches":
       return <MatchesCard data={card.data} />;
+    case "comparison":
+      return <ComparisonCard data={card.data} />;
+    case "brief":
+      return <BriefCard data={card.data} />;
   }
 }
 
