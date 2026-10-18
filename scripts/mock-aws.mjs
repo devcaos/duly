@@ -38,11 +38,28 @@ const toolUseId = () => `tooluse_mock${nextId++}`;
 
 function converse(body) {
   const forced = body.toolConfig?.toolChoice?.tool?.name;
-  if (forced) {
+  if (forced === "return_result") {
     // Duly's document tools (lib/llm/bedrock.ts) force one tool whose input is the answer.
     return toolUseReply(forced, structuredAnswer(body));
   }
-  return agentTurn(body.messages ?? [], Boolean(body.toolConfig?.toolChoice?.any));
+  // Like real Bedrock: when a tool result mixes text and json blocks, the tools are silently
+  // dropped from the request and Nova can only answer in text (see FRICTION.md).
+  if (mixesTextAndJson(body.messages ?? [])) return textReply("Okay, let me look at the earlier letter first.");
+  const mustUseTool = Boolean(body.toolConfig?.toolChoice?.any) || Boolean(forced);
+  const reply = agentTurn(body.messages ?? [], mustUseTool);
+  // toolChoice { tool }: the model must call that tool, so it only fills the arguments.
+  const picked = reply.output.message.content[0].toolUse;
+  if (forced && picked?.name !== forced) return toolUseReply(forced, {});
+  return reply;
+}
+
+function mixesTextAndJson(messages) {
+  return messages.some((message) =>
+    (message.content ?? []).some((block) => {
+      const content = block.toolResult?.content ?? [];
+      return content.some((part) => part.json !== undefined) && content.some((part) => part.text !== undefined);
+    }),
+  );
 }
 
 function toolUseReply(name, input) {
@@ -160,6 +177,12 @@ function agentTurn(messages, mustUseTool) {
   // Test hook: "[text-first]" answers in text unless a tool call is required (toolChoice any),
   // like Nova 2 Lite sometimes does.
   if (q.includes("[text-first]") && !mustUseTool) return textReply("Sure, let me check that for you.");
+  // Test hook: "[text-always]" answers in text even when a tool is required (tests the
+  // server-side default call).
+  if (q.includes("[text-always]")) return textReply("Sure, let me check that for you.");
+  // Test hook: "[bad-input]" calls list_deadlines with a date the server rejects (tests the
+  // input validation log and the server-side default call).
+  if (q.includes("[bad-input]")) return toolUseReply("list_deadlines", { from: "this month" });
   // Test hook: "[search-only]" calls search_documents, like Nova did for "explain the letter".
   if (q.includes("[search-only]")) return toolUseReply("search_documents", { query: guessQuery(q, "parking") });
 

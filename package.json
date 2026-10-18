@@ -8,6 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "tools": "node scripts/call-tools.mjs",
+    "smoke:bedrock": "node scripts/smoke-bedrock.mjs",
     "samples": "node scripts/generate-samples.mjs",
     "setup:aws": "tsx scripts/setup-aws.ts",
     "seed:aws": "tsx scripts/seed-aws.ts",

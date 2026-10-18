@@ -61,6 +61,13 @@ export function endOfMonth(iso: string): string {
   return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + 1, 0)).toISOString().slice(0, 10);
 }
 
+// "this month" / "this week" as from/to dates starting today. Sunday ends the week.
+export function periodRange(period: "month" | "week", today = todayISO()): { from: string; to: string } {
+  if (period === "month") return { from: today, to: endOfMonth(today) };
+  const weekday = new Date(`${today}T00:00:00Z`).getUTCDay();
+  return { from: today, to: addDays(today, (7 - weekday) % 7) };
+}
+
 export function formatMoney(amount: number, currency = "USD"): string {
   return new Intl.NumberFormat("en-US", { style: "currency", currency }).format(amount);
 }

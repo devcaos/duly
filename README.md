@@ -94,6 +94,7 @@ Three actions are only needed by `npm run setup:aws`: **`dynamodb:CreateTable`**
 2. `npm run setup:aws`, then `npm run seed:aws`.
 3. Set `STORAGE=aws`, `LLM_PROVIDER=bedrock` (and optionally `LLM_FALLBACK=gemini`) in `.env.local`, then `npm run dev`.
 4. `npm run tools -- samples/07-riverside-water-bill.pdf` calls every tool, including `add_document` with a PDF.
+5. `npm run smoke:bedrock` sends the demo questions to `/api/chat`, one by one and as a conversation. For each one it prints the tool chosen, the route (`model`: Nova picked it; `forced-keyword` / `forced-any`: asked again, requiring a tool; `server-default`: the server called the tool itself) and the spoken reply. Pass a base URL to test a deployment: `npm run smoke:bedrock -- https://<your-project>.vercel.app`.
 
 ### Test the demo web without AWS
 
@@ -103,6 +104,6 @@ Three actions are only needed by `npm run setup:aws`: **`dynamodb:CreateTable`**
 2. In `.env.local`, set `LLM_PROVIDER=bedrock`, `AWS_ACCESS_KEY_ID=mock`, `AWS_SECRET_ACCESS_KEY=mock`, `AWS_ENDPOINT_URL_BEDROCK_RUNTIME=http://localhost:4010` and `AWS_ENDPOINT_URL_POLLY=http://localhost:4010` (and `STORAGE=memory`).
 3. In another terminal: `npm run dev`, then open http://localhost:3000.
 
-Test hooks in the mock: put `[text-first]` in a question to make the model answer in text first (tests the forced-tool retry), `[search-only]` to make it call only `search_documents` (tests the explain fallback), and `[bad-draft]` / `[bad-draft-twice]` in a `draft_reply` intent to test the letter validator's retry and the template letter.
+Like real Bedrock, the mock answers in text when a tool result in the history mixes text and JSON (see FRICTION.md). Test hooks in the mock: put `[text-first]` in a question to make the model answer in text first (tests the forced-tool retry), `[text-always]` to answer in text even when a tool is required, `[bad-input]` to send arguments the server rejects (both test the server-side default call), `[search-only]` to make it call only `search_documents` (tests the explain fallback), and `[bad-draft]` / `[bad-draft-twice]` in a `draft_reply` intent to test the letter validator's retry and the template letter.
 
 The mock Polly plays a short chime instead of speech. Start it with `MOCK_POLLY=fail npm run mock:aws` to test the browser voice fallback. Remove the `AWS_ENDPOINT_URL_*` lines to use real AWS.

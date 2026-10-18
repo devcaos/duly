@@ -16,10 +16,17 @@ export interface Card {
   data: Record<string, unknown>;
 }
 
+// How /api/chat chose the tool: Nova picked it ("model"), Nova was asked again requiring the
+// keyword tool or any tool ("forced-keyword", "forced-any"), or the server called the keyword
+// tool itself with default arguments ("server-default").
+export type ChatRoute = "model" | "forced-keyword" | "forced-any" | "server-default";
+
 export interface ChatResponse {
   reply: string;
   cards: Card[];
   turn: ChatTurn;
+  // Only for questions answered by the agent (not direct tool calls).
+  route?: ChatRoute;
   error?: boolean;
 }
 
