@@ -9,7 +9,7 @@ Duly is a standard remote MCP server (Streamable HTTP, no sign-in). Production e
 https://<your-project>.vercel.app/api/mcp
 ```
 
-It comes with 14 fictional sample documents (marked SAMPLE): an electricity bill, a car insurance renewal, a dishwasher receipt with warranty, a parking notice, a gym auto-renewal and a school field-trip form, plus four more warranties (a TV, a fridge that is about to run out, an expired washing machine and a laptop) and two earlier electricity and water bills each, so bills can be compared. All dates are relative to today, so deadlines are always upcoming; the earlier bills are already paid and never show up as deadlines.
+It comes with 14 fictional sample documents (marked SAMPLE): an electricity bill, a car insurance renewal, a dishwasher receipt with warranty, a parking notice, a gym auto-renewal and a school field-trip form, plus four more warranties (a TV, a fridge that is about to run out, an expired washing machine and a laptop) and two earlier electricity and water bills each, so bills can be compared (the electricity bills also store their kWh usage). All dates are relative to today, so deadlines are always upcoming; the earlier bills are already paid and never show up as deadlines.
 
 ### Tools
 
@@ -21,7 +21,7 @@ It comes with 14 fictional sample documents (marked SAMPLE): an electricity bill
 | `check_warranty` | One product's warranty (days left, how to claim) or every warranty with its status: active, expiring soon or expired. | no |
 | `draft_reply` | Short letter or email that uses the document's real numbers and dates. | yes |
 | `search_documents` | Finds stored documents by keywords. | no |
-| `compare_bills` | Latest bill from a company vs the previous one and vs the usual (average) amount, with percentages ("is my Brightwave bill higher than usual?"). Only states the numbers, never a reason. | no |
+| `compare_bills` | Latest bill from a company vs the previous one and vs the usual (average) amount, with percentages ("is my Brightwave bill higher than usual?"). When the bills store their usage in the same unit (kWh, gallons), it also tells "you used more" apart from "the price per unit went up". Only states the numbers, never a reason. | no |
 | `weekly_brief` | The next 7 days (or `days`), most urgent first: deadlines with amounts, renewals you can still cancel, warranties ending within 60 days and bills at least 15% above usual. | no |
 
 When a company has several bills, search, explanations and drafts always use the latest one.

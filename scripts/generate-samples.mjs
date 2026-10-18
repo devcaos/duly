@@ -744,14 +744,19 @@ These documents are only in \`lib/storage/seed.ts\`, for \`check_warranty\`, \`c
 | \`doc-frostline-fridge\` | FrostLine refrigerator receipt (product \`fridge\`) | Receipt FL-88310, bought today - 345, $1,199.00, 1-year warranty ends today + 20 (expiring soon) |
 | \`doc-aquaspin-washer\` | AquaSpin washing machine receipt | Receipt AS-41562, bought today - 760, $479.00, 2-year warranty ended today - 30 (expired) |
 | \`doc-pinewood-laptop\` | Pinewood Computers laptop receipt | Receipt PW-60294, bought today - 365, $899.00, 2-year warranty ends today + 365 (active) |
-| \`doc-brightwave-bill-prev-1\` | Earlier Brightwave Energy bill, paid | Issued today - 42, $70.10, no deadlines |
-| \`doc-brightwave-bill-prev-2\` | Earlier Brightwave Energy bill, paid | Issued today - 73, $68.40, no deadlines |
-| \`doc-riverside-water-prev-1\` | Earlier Riverside Water Company bill, paid | Issued today - 30, $55.90, no deadlines |
-| \`doc-riverside-water-prev-2\` | Earlier Riverside Water Company bill, paid | Issued today - 61, $54.30, no deadlines |
+| \`doc-brightwave-bill-prev-1\` | Earlier Brightwave Energy bill, paid | Issued today - 42, $70.10, 340 kWh, no deadlines |
+| \`doc-brightwave-bill-prev-2\` | Earlier Brightwave Energy bill, paid | Issued today - 73, $68.40, 336 kWh, no deadlines |
+| \`doc-riverside-water-prev-1\` | Earlier Riverside Water Company bill, paid | Issued today - 30, $55.90, 4,100 gallons, no deadlines |
+| \`doc-riverside-water-prev-2\` | Earlier Riverside Water Company bill, paid | Issued today - 61, $54.30, 3,950 gallons, no deadlines |
 
 Expected comparisons: Brightwave $84.20 is about 22% higher than the usual $69.25 (average of
 $70.10 and $68.40) and $14.10 more than the previous bill. After uploading sample 7 ($56.75),
 Riverside is about the same as usual ($55.10).
+
+Usage (stored in the seed only; \`add_document\` does not extract it): the latest Brightwave bill
+(412 kWh) uses about 22% more than the usual 338 kWh, at about the same price per kWh ($0.204
+vs $0.205), so \`compare_bills\` says "You used about 22% more electricity than usual, at about the
+same price per kWh." Sample 7 is saved without usage, so the Riverside comparison uses amounts only.
 `;
 
 function buildReadme() {
