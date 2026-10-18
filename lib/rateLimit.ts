@@ -1,10 +1,13 @@
+import { timingSafeEqual } from "node:crypto";
+
 // Basic per-IP rate limiting (SPEC.md section 4: demo mitigations).
 // The counters live in memory, so they are per server instance: each Vercel
 // instance has its own counters and they reset when the instance restarts.
 // That's acceptable for the demo; a shared store would be needed for production.
 
 const WINDOW_MS = 60_000;
-const MAX_TRACKED_KEYS = 10_000;
+// Hard cap on tracked keys, so a flood of different IPs can't grow the map without limit.
+export const MAX_TRACKED_KEYS = 10_000;
 
 // key ("<bucket>:<ip>") -> timestamps of recent hits
 const hits = new Map<string, number[]>();
@@ -36,9 +39,9 @@ export function getClientIp(req?: Request): string {
 // Records one hit and returns false if the limit for this minute is exceeded.
 export function allowRequest(bucket: string, ip: string, limit: number): boolean {
   const now = Date.now();
-  if (hits.size > MAX_TRACKED_KEYS) removeExpired(now);
-
   const key = `${bucket}:${ip}`;
+  if (!hits.has(key) && hits.size >= MAX_TRACKED_KEYS) makeRoom(now);
+
   const recent = (hits.get(key) ?? []).filter((t) => now - t < WINDOW_MS);
   if (recent.length >= limit) {
     hits.set(key, recent);
@@ -49,8 +52,36 @@ export function allowRequest(bucket: string, ip: string, limit: number): boolean
   return true;
 }
 
-function removeExpired(now: number) {
+// Frees space for one new key: drops expired keys first and, if the map is still full, the
+// oldest ones (a Map iterates in insertion order).
+function makeRoom(now: number) {
   for (const [key, times] of hits) {
     if (times.every((t) => now - t >= WINDOW_MS)) hits.delete(key);
   }
+  for (const key of hits.keys()) {
+    if (hits.size < MAX_TRACKED_KEYS) break;
+    hits.delete(key);
+  }
+}
+
+// Header that the demo web's /api/chat sends on its own calls to /api/mcp. /api/chat already
+// rate-limits each user by their real IP, so those internal calls skip the per-IP limits here
+// (otherwise every visitor would share the server's own IP bucket).
+export const INTERNAL_TOKEN_HEADER = "x-duly-internal-token";
+const MIN_TOKEN_CHARS = 16;
+
+export function internalToken(): string | undefined {
+  const token = process.env.DULY_INTERNAL_TOKEN;
+  return token && token.length >= MIN_TOKEN_CHARS ? token : undefined;
+}
+
+// True only when DULY_INTERNAL_TOKEN is set and the request carries exactly that value.
+export function isInternalRequest(req?: Request): boolean {
+  const expected = internalToken();
+  const received = req?.headers.get(INTERNAL_TOKEN_HEADER);
+  if (!expected || !received) return false;
+  const a = Buffer.from(received);
+  const b = Buffer.from(expected);
+  // Constant-time comparison, so the token can't be guessed one character at a time.
+  return a.length === b.length && timingSafeEqual(a, b);
 }

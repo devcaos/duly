@@ -37,13 +37,35 @@ export function describeDaysLeft(days: number): string {
   return `in ${days} days`;
 }
 
-// "November 14" (spoken-friendly)
+// "November 14", or "September 12, 2027" when the year isn't the current one (spoken-friendly).
 export function formatSpokenDate(iso: string): string {
+  return iso.slice(0, 4) === todayISO().slice(0, 4) ? formatMonthDay(iso) : formatLongDate(iso);
+}
+
+// "October 5, 2026": always with the year (letters).
+export function formatLongDate(iso: string): string {
+  return `${formatMonthDay(iso)}, ${iso.slice(0, 4)}`;
+}
+
+function formatMonthDay(iso: string): string {
   return new Date(`${iso}T00:00:00Z`).toLocaleDateString("en-US", {
     month: "long",
     day: "numeric",
     timeZone: "UTC",
   });
+}
+
+// Last day of the calendar month of `iso`: "2026-10-17" -> "2026-10-31".
+export function endOfMonth(iso: string): string {
+  const date = new Date(`${iso}T00:00:00Z`);
+  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + 1, 0)).toISOString().slice(0, 10);
+}
+
+// "this month" / "this week" as from/to dates starting today. Sunday ends the week.
+export function periodRange(period: "month" | "week", today = todayISO()): { from: string; to: string } {
+  if (period === "month") return { from: today, to: endOfMonth(today) };
+  const weekday = new Date(`${today}T00:00:00Z`).getUTCDay();
+  return { from: today, to: addDays(today, (7 - weekday) % 7) };
 }
 
 export function formatMoney(amount: number, currency = "USD"): string {

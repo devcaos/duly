@@ -21,6 +21,16 @@ const TEMPORARY_STATUSES = new Set([408, 429, 503, 504]);
 // No credentials found, so the request never reached AWS.
 const CREDENTIALS_ERRORS = new Set(["CredentialsProviderError"]);
 
+// Model used for every Bedrock call (document tools and the demo web's /api/chat agent).
+export function bedrockModelId(): string {
+  return process.env.BEDROCK_MODEL_ID || DEFAULT_MODEL;
+}
+
+// Only 2 attempts, so a throttled request falls back to Gemini (or fails) quickly.
+export function createBedrockClient(): BedrockRuntimeClient {
+  return new BedrockRuntimeClient({ region: awsRegion(), maxAttempts: 2 });
+}
+
 // Amazon Bedrock Converse API (default model: Amazon Nova 2 Lite).
 // Nova 2 Lite doesn't support Bedrock "structured outputs", so we use the pattern from the
 // Nova docs: one tool whose input schema is the answer format, and force the model to call it.
@@ -29,9 +39,8 @@ export class BedrockLlm implements LlmAdapter {
   private model: string;
 
   constructor() {
-    // Only 2 attempts, so a throttled request falls back to Gemini quickly.
-    this.client = new BedrockRuntimeClient({ region: awsRegion(), maxAttempts: 2 });
-    this.model = process.env.BEDROCK_MODEL_ID || DEFAULT_MODEL;
+    this.client = createBedrockClient();
+    this.model = bedrockModelId();
   }
 
   async generateJson<T>(req: GenerateJsonRequest<T>): Promise<T> {
@@ -83,7 +92,7 @@ export class BedrockLlm implements LlmAdapter {
 }
 
 // Decides what a failed Bedrock call means. Only "try again later" errors may use the fallback.
-function toLlmError(error: unknown): LlmError {
+export function toLlmError(error: unknown): LlmError {
   const name = error instanceof Error ? error.name : "UnknownError";
   const status = (error as { $metadata?: { httpStatusCode?: number } }).$metadata?.httpStatusCode;
   const summary = summarizeError(error);

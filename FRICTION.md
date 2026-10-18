@@ -48,3 +48,44 @@ One entry per problem with an Amazon/AWS/MCP tool, SDK or doc. Write it when it 
 - **Severity:** minor
 - **Workaround:** Forced tool call with `temperature: 0`, then validate `toolUse.input` with zod (`lib/llm/bedrock.ts`). Works for text, PNG and PDF input.
 - **Suggestion:** Add a "supported models" table to the structured outputs page, and link the Nova forced-tool pattern from there.
+
+### Bedrock Runtime and Polly clients only speak HTTP/2: "Protocol error" against a local mock
+- **Tool / API / SDK:** AWS SDK for JavaScript v3 (3.1152), `@aws-sdk/client-bedrock-runtime` (Converse) and `@aws-sdk/client-polly`, `AWS_ENDPOINT_URL_BEDROCK_RUNTIME` / `AWS_ENDPOINT_URL_POLLY`
+- **Task I attempted:** Test the demo web without AWS credentials by pointing the SDK at a small local mock of the Converse and SynthesizeSpeech APIs.
+- **Steps I took:** Started a Node `http` server that answers `POST /model/{modelId}/converse`, set `AWS_ENDPOINT_URL_BEDROCK_RUNTIME=http://localhost:4010` and fake credentials, then called `ConverseCommand`.
+- **Expected:** The requests reach the mock, as they would with any HTTP endpoint.
+- **What actually happened:** Every call failed with a bare `Error: Protocol error` (no status, no hint). Both clients use an HTTP/2 request handler (`NodeHttp2Handler`), even for plain `Converse` and `SynthesizeSpeech`, so they can't talk to an HTTP/1.1 endpoint. This isn't mentioned in the endpoint-override docs, and I first assumed only Bedrock (which has bidirectional streaming) was affected.
+- **Severity:** minor
+- **Workaround:** Serve the mock with `node:http2` (`createServer`, plaintext h2c), one port for both services (`scripts/mock-aws.mjs`).
+- **Suggestion:** Wrap the HTTP/2 failure in a clearer error ("endpoint does not support HTTP/2"), and note in the service-specific endpoints docs that some clients require HTTP/2.
+
+### MCP `subscriptions/listen` streams never close on a serverless deploy
+- **Tool / API / SDK:** MCP TypeScript SDK v2 (`@modelcontextprotocol/server` 2.3.1) via `mcp-handler` 2.3.0, Streamable HTTP, spec 2026-07-28, on Vercel
+- **Task I attempted:** Run Duly's stateless MCP endpoint on Vercel with `maxDuration = 60`.
+- **Steps I took:** Deployed, connected modern (2026-07-28) clients, then read the Vercel logs.
+- **Expected:** Every request to a stateless server finishes in a few seconds.
+- **What actually happened:** Almost every minute a `POST /api/mcp` ended in "Task timed out after 60 seconds". Modern clients send a `subscriptions/listen` request, and the server answers with an SSE stream that it keeps open forever (keep-alive every 15 s) because `McpServer` advertises `tools.listChanged: true` by default once a tool is registered. Vercel kills the function at `maxDuration`, the client listens again, and the cycle repeats. Nothing in the `mcp-handler` README mentions this.
+- **Severity:** major (wasted function time, noisy error logs)
+- **Workaround:** Duly's tools never change, so the handler advertises `capabilities: { tools: { listChanged: false } }`. The SDK then acknowledges the listen request and closes the stream at once (`app/api/mcp/route.ts`). Verified locally: the listen POST went from staying open indefinitely to 10 ms.
+- **Suggestion:** Default `listChanged` to false unless the server actually changes its tool list, or have serverless adapters like `mcp-handler` warn and cap listen streams below the platform timeout.
+
+### Nova 2 Lite answers in text instead of calling an obvious tool
+- **Tool / API / SDK:** Amazon Bedrock Converse API, Amazon Nova 2 Lite (`eu.amazon.nova-2-lite-v1:0`), tool use with `toolChoice` auto, temperature 0
+- **Task I attempted:** Route Echo Show questions ("Is my dishwasher still under warranty?") to the right Duly MCP tool in one Converse call.
+- **Steps I took:** Sent the six Duly tools with their descriptions and a short routing prompt, `temperature: 0` as the Nova docs recommend for tool calling.
+- **Expected:** A `toolUse` block for `check_warranty`, since the question matches its description almost word for word.
+- **What actually happened:** In preview testing, the first two attempts came back as plain text with no tool call; only the third called `check_warranty`. The Nova docs also warn that the model may output text even when a tool choice is set. I couldn't open the AWS docs from the cloud sandbox I was coding in (its network policy blocks docs.aws.amazon.com), so I could only confirm from the indexed text of the official pages that Nova 2 accepts `toolChoice: { any: {} }`.
+- **Severity:** major (the demo answered "I can help with..." to a clear question)
+- **Workaround:** If the first call returns no tool, retry once with `toolChoice: { any: {} }` (forces at least one tool call), and only then fall back to a help sentence (`lib/agent/agent.ts`). Clearer tool descriptions ("use this for ...", "don't search first") also helped.
+- **Suggestion:** Document how often `auto` skips tools on Nova 2 Lite, recommend `any` for router-style prompts, and add a model-specific tool-use example that shows the retry pattern.
+- **Update (testing with real Bedrock):** most of these text answers had another cause: see the next entry. With that fixed, Nova 2 Lite picked the right tool on its own for all 10 smoke-test questions. The retry stays as a safety net.
+
+### Bedrock silently drops the tools when a tool result mixes text and JSON
+- **Tool / API / SDK:** Amazon Bedrock Converse API, Amazon Nova 2 Lite (`eu.amazon.nova-2-lite-v1:0`), `ToolResultBlock` in the conversation history
+- **Task I attempted:** Send earlier exchanges back to Nova as real `toolUse` / `toolResult` messages, so follow-ups like "make it firmer" know which document they refer to. Each tool result had a `text` block (the spoken sentence) and a `json` block (`{ document_id }`).
+- **Steps I took:** On the Vercel preview, asked "Explain the parking fine letter." and then "Is my dishwasher still under warranty?". Then reproduced it locally against real Bedrock, logging `stopReason` and `usage` for each call, and ran A/B tests with only the history shape changed.
+- **Expected:** Either a `check_warranty` call, or a `ValidationException` if that content mix isn't allowed.
+- **What actually happened:** No error. Nova answered in plain text (`stopReason: end_turn`), even with `toolChoice: { any: {} }`, which should force a tool call. `usage.inputTokens` fell from about 2,400 to 419: the six tool definitions were no longer in the prompt. Only the very first question of a conversation worked. Everything after a turn that returned a document failed, so it looked like Nova was unreliable. The Nova docs do say "The contents of the ToolResultBlock should be either a single JSON or a mix of text and images", but nothing warns that breaking this rule silently removes the tools. Our local Bedrock mock accepted the mixed result, so the bug passed every mock test.
+- **Severity:** major (most demo questions got the "I can help with..." sentence)
+- **Workaround:** A tool result with a document is now one `json` block, `{ result, document_id }`; other results are text only (`lib/agent/agent.ts`). A/B results: text + json → 419 input tokens, text answer; single json → 2,490 tokens, `check_warranty`. The mock (`scripts/mock-aws.mjs`) now copies the real behavior and answers in text when a tool result mixes the two. `npm run smoke:bedrock` sends questions that come after a document turn.
+- **Suggestion:** Reject a `ToolResultBlock` that mixes `text` and `json` with a `ValidationException`, as Bedrock does for other invalid content, or at least warn about it. Say clearly on the Converse tool-use page which content combinations each model accepts.

@@ -11,7 +11,14 @@ import { runSearchDocuments, searchDocumentsOutput } from "@/lib/tools/searchDoc
 import { addDocumentOutput, runAddDocument } from "@/lib/tools/addDocument";
 import { explainDocumentOutput, runExplainDocument } from "@/lib/tools/explainDocument";
 import { draftReplyOutput, runDraftReply, TONES } from "@/lib/tools/draftReply";
-import { allowRequest, getClientIp, llmLimitPerMinute, requestLimitPerMinute } from "@/lib/rateLimit";
+import {
+  allowRequest,
+  getClientIp,
+  isInternalRequest,
+  llmLimitPerMinute,
+  requestLimitPerMinute,
+} from "@/lib/rateLimit";
+import { cleanSpoken } from "@/lib/speech";
 import {
   isoDateSchema as isoDate,
   MAX_BASE64_CHARS,
@@ -27,13 +34,14 @@ export const maxDuration = 60;
 
 const documentId = () => z.string().max(MAX_ID_CHARS);
 
-// Spoken text for voice + full data for screens (SPEC.md section 4).
+// Spoken text for voice (passed through cleanSpoken: no ids, raw JSON or ISO dates)
+// + full data for screens (SPEC.md section 4).
 // The MCP spec says a tool returning structuredContent SHOULD also return it
 // serialized as JSON in a text block, for clients that only read text content.
 function toMcpResult<T extends object>(result: ToolResult<T>) {
   return {
     content: [
-      { type: "text" as const, text: result.text },
+      { type: "text" as const, text: cleanSpoken(result.text) },
       { type: "text" as const, text: JSON.stringify(result.structuredContent) },
     ],
     structuredContent: result.structuredContent as Record<string, unknown>,
@@ -57,8 +65,9 @@ async function runTool<T extends object>(run: () => Promise<ToolResult<T>>) {
 }
 
 // Same as runTool, but first applies the per-IP limit for tools that call the LLM.
+// The demo web's internal calls skip it: /api/chat already limits each user.
 async function runLlmTool<T extends object>(req: Request | undefined, run: () => Promise<ToolResult<T>>) {
-  if (!allowRequest("llm", getClientIp(req), llmLimitPerMinute())) {
+  if (!isInternalRequest(req) && !allowRequest("llm", getClientIp(req), llmLimitPerMinute())) {
     return toMcpError("You've used the AI tools a lot in the last minute. Please wait a moment and try again.");
   }
   return runTool(run);
@@ -95,11 +104,18 @@ const mcpHandler = createMcpHandler(
       {
         title: "List deadlines",
         description:
-          "List upcoming household deadlines (payments, renewals, reply-by dates, warranty ends, appointments) sorted by date, with amounts and days left. Defaults to today through the next 30 days.",
+          "List upcoming household deadlines (payments, renewals, reply-by dates, warranty ends, appointments) sorted by date, with amounts and days left. Defaults to today through the next 30 days. For \"what do I need to pay?\" use payable: true: it returns every deadline with an amount (bills, renewals, fees), not only payment_due.",
         inputSchema: z.object({
           from: isoDate.optional().describe("Start date (YYYY-MM-DD). Default: today."),
           to: isoDate.optional().describe("End date (YYYY-MM-DD). Default: 30 days after `from`."),
-          kind: z.enum(DEADLINE_KINDS).optional().describe("Only return deadlines of this kind."),
+          kind: z
+            .enum(DEADLINE_KINDS)
+            .optional()
+            .describe("Only return deadlines of this kind. For questions about paying, use payable instead."),
+          payable: z
+            .boolean()
+            .optional()
+            .describe("Only deadlines with an amount to pay (bills, renewals, fees). Use for 'what do I need to pay?'."),
         }),
         outputSchema: listDeadlinesOutput,
         annotations: { readOnlyHint: true },
@@ -112,10 +128,11 @@ const mcpHandler = createMcpHandler(
       {
         title: "Explain document",
         description:
-          "Explain a stored document in plain language: what it means, what happens if it's ignored, and the recommended next step. Find it by document_id or by keywords (query). Optionally answer a specific question.",
+          "Explain a stored document in plain language: what it means, what happens if it's ignored, and the recommended next step. Use it for \"explain the parking letter\", \"what does this letter mean?\", \"what happens if I ignore it?\" or any question about one document. It finds the document itself from keywords (query) or the sender (issuer); no need to search first. document_id is optional.",
         inputSchema: z.object({
-          document_id: documentId().optional().describe("Document id from search_documents or list_deadlines."),
-          query: shortText().optional().describe("Keywords to find the document, e.g. 'parking notice'."),
+          document_id: documentId().optional().describe("Document id, if already known from an earlier result."),
+          query: shortText().optional().describe("Keywords to find the document, e.g. 'parking fine letter'."),
+          issuer: shortText().optional().describe("Who sent the document, e.g. 'City of Maplewood'."),
           question: shortText().optional().describe("The user's question, e.g. 'What happens if I ignore it?'"),
         }),
         outputSchema: explainDocumentOutput,
@@ -129,9 +146,13 @@ const mcpHandler = createMcpHandler(
       {
         title: "Check warranty",
         description:
-          "Check whether a product (e.g. 'dishwasher') is still under warranty: end date, days remaining and how to claim.",
+          "Check whether a product (e.g. 'dishwasher') is still under warranty: end date, days remaining and how to claim. Omit product to list all warranties with their status (active, expiring soon, expired), e.g. for \"which of my warranties are still active?\".",
         inputSchema: z.object({
-          product: z.string().min(1).max(MAX_PRODUCT_CHARS).describe("Product name, e.g. 'dishwasher'."),
+          product: z
+            .string()
+            .max(MAX_PRODUCT_CHARS)
+            .optional()
+            .describe("Product name, e.g. 'dishwasher'. Leave it out to list every warranty."),
         }),
         outputSchema: checkWarrantyOutput,
         annotations: { readOnlyHint: true },
@@ -144,10 +165,11 @@ const mcpHandler = createMcpHandler(
       {
         title: "Draft reply",
         description:
-          "Draft a short letter or email replying to a stored document (e.g. ask for a payment extension, cancel a subscription, appeal a fine), using the document's real numbers and dates. Find it by document_id or by keywords (query).",
+          "Draft a short letter or email replying to a stored document (e.g. ask for a payment extension, cancel a subscription, appeal a fine), using the document's real numbers and dates. It finds the document itself from keywords (query) or the sender (issuer); no need to search first.",
         inputSchema: z.object({
           document_id: documentId().optional().describe("Document id from search_documents or list_deadlines."),
           query: shortText().optional().describe("Keywords to find the document, e.g. 'electricity bill'."),
+          issuer: shortText().optional().describe("Who sent the document, e.g. 'Brightwave Energy'."),
           intent: shortText().min(1).describe("What the reply should achieve, e.g. 'ask for a payment extension'."),
           tone: z.enum(TONES).optional().describe("Default: polite."),
         }),
@@ -162,7 +184,7 @@ const mcpHandler = createMcpHandler(
       {
         title: "Search documents",
         description:
-          "Search the household's stored documents (bills, insurance, warranties, letters...) by keywords. Returns the top matches with id, title, issuer and type.",
+          "Search the household's stored documents (bills, insurance, warranties, letters...) by keywords. Returns the top matches with id, title, issuer and type. Only for finding or listing documents: don't call it before explain_document, draft_reply or check_warranty, which find the document themselves.",
         inputSchema: z.object({
           query: shortText().min(1).describe("Keywords, e.g. 'car insurance'."),
         }),
@@ -174,12 +196,17 @@ const mcpHandler = createMcpHandler(
   },
   {
     serverInfo: { name: "duly", version: "0.2.0" },
+    // Duly's tool list never changes. Advertising listChanged: false makes the SDK answer a
+    // 2026-07-28 `subscriptions/listen` request and close its SSE stream right away. With the
+    // default (true) the stream stays open forever and Vercel kills it after maxDuration.
+    capabilities: { tools: { listChanged: false } },
   },
 );
 
-// Per-IP limit on every request to /api/mcp (see lib/rateLimit.ts).
+// Per-IP limit on every request to /api/mcp (see lib/rateLimit.ts), except the demo web's
+// internal calls (signed with DULY_INTERNAL_TOKEN), which /api/chat limits per user instead.
 async function handler(req: Request): Promise<Response> {
-  if (!allowRequest("all", getClientIp(req), requestLimitPerMinute())) {
+  if (!isInternalRequest(req) && !allowRequest("all", getClientIp(req), requestLimitPerMinute())) {
     return Response.json(
       {
         jsonrpc: "2.0",
@@ -188,6 +215,13 @@ async function handler(req: Request): Promise<Response> {
       },
       { status: 429, headers: { "Retry-After": "60" } },
     );
+  }
+  // The server is stateless and Duly's tool list never changes, so there is nothing to stream
+  // over a GET. Answer 405 right away instead of leaving a stream open until maxDuration.
+  // (subscriptions/listen is a POST of the 2026-07-28 protocol; the SDK closes it at once, see
+  // the capabilities note above.)
+  if (req.method === "GET") {
+    return new Response(null, { status: 405, headers: { Allow: "POST" } });
   }
   return mcpHandler(req);
 }
