@@ -1,4 +1,4 @@
-import { billsByIssuer, docDate, isBill, issuerKey, supersededBillIds } from "@/lib/bills";
+import { allBillsByIssuer, docDate, isBillDoc, issuerKey, supersededBillIds } from "@/lib/bills";
 import type { Document } from "@/lib/types";
 
 // Very simple keyword search: good enough for a handful of household documents.
@@ -42,13 +42,13 @@ export function scoreDocument(doc: Document, query: string): number {
 // so it can still be found on purpose.
 export function searchDocuments(docs: Document[], query: string, limit = 5): Document[] {
   const scores = new Map(docs.map((doc) => [doc.id, scoreDocument(doc, query)]));
-  const latest = new Map([...billsByIssuer(docs)].map(([key, bills]) => [key, bills[0]]));
+  const latest = new Map([...allBillsByIssuer(docs)].map(([key, bills]) => [key, bills[0]]));
   const superseded = supersededBillIds(docs);
 
   return docs
     .map((doc) => {
       let score = scores.get(doc.id) ?? 0;
-      if (superseded.has(doc.id) && isBill(doc)) {
+      if (superseded.has(doc.id) && isBillDoc(doc)) {
         const latestScore = scores.get(latest.get(issuerKey(doc.issuer))?.id ?? "") ?? 0;
         if (latestScore > 0) score = Math.min(score, latestScore);
       }

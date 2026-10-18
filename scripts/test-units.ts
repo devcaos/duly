@@ -279,6 +279,28 @@ async function storageChecks() {
     assert.equal(water.structuredContent.comparison?.latest.documentId, uploaded.id);
     assert.equal(water.structuredContent.comparison?.trend, "about_the_same");
   });
+
+  // Also saves into the shared store: a newer bill whose extraction missed the amount.
+  await checkAsync("a newer Riverside bill without amount still wins over the earlier bills", async () => {
+    const withoutAmount: Document = { ...bill("doc-unit-riverside-no-amount", 0, 0), amount: undefined };
+    const noAmount: Document = {
+      ...withoutAmount,
+      householdId: HOUSEHOLD_ID,
+      title: "Riverside Water Company water bill (no amount)",
+      issuer: "Riverside Water Company",
+      createdAt: new Date(Date.now() + 60_000).toISOString(),
+    };
+    await getStorage().saveDocument(noAmount);
+    const docs = await getStorage().listDocuments(HOUSEHOLD_ID);
+    const first = searchDocuments(docs, "water bill")[0];
+    assert.equal(first.id, noAmount.id);
+    assert.equal(hasPrev([first.id]), false);
+    assert.equal((await resolveDocument({ query: "water bill" })).id, noAmount.id);
+    assert.equal((await resolveDocument({ issuer: "Riverside Water Company" })).id, noAmount.id);
+    // Amounts are still compared between bills that have one.
+    const water = await runCompareBills({ query: "water bill" });
+    assert.notEqual(water.structuredContent.comparison?.latest.documentId, noAmount.id);
+  });
 }
 
 storageChecks()
