@@ -71,3 +71,10 @@ export function periodRange(period: "month" | "week", today = todayISO()): { fro
 export function formatMoney(amount: number, currency = "USD"): string {
   return new Intl.NumberFormat("en-US", { style: "currency", currency }).format(amount);
 }
+
+// "$69": rounded to whole units, for approximate amounts like "your usual $69".
+export function formatWholeMoney(amount: number, currency = "USD"): string {
+  return new Intl.NumberFormat("en-US", { style: "currency", currency, maximumFractionDigits: 0, minimumFractionDigits: 0 }).format(
+    amount,
+  );
+}

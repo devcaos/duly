@@ -9,7 +9,15 @@ export interface ChatTurn {
 }
 
 // What the screen shows next to the spoken answer. `data` is the tool's structuredContent.
-export type CardKind = "deadlines" | "document" | "warranty" | "draft" | "explanation" | "matches";
+export type CardKind =
+  | "deadlines"
+  | "document"
+  | "warranty"
+  | "draft"
+  | "explanation"
+  | "matches"
+  | "comparison"
+  | "brief";
 
 export interface Card {
   kind: CardKind;

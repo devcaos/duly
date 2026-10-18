@@ -195,12 +195,19 @@ function agentTurn(messages, mustUseTool) {
       return toolUseReply("draft_reply", { ...previous.input, tone: /firm|stronger/.test(q) ? "firm" : "polite" });
     }
   }
+  if (/\b(brief|briefing|weekly|overview)\b/.test(q) || (/summar/.test(q) && /\bweek\b/.test(q))) {
+    return toolUseReply("weekly_brief", {});
+  }
   if (/warrant/.test(q)) {
     if (/which|all|warranties|active/.test(q)) return toolUseReply("check_warranty", {});
     const product = q.match(/my ([a-z]+)/)?.[1] ?? "dishwasher";
     return toolUseReply("check_warranty", { product });
   }
-  if (/mean|explain|ignore|what is this|what's this/.test(q)) {
+  if (/higher|lower|usual|normal|compare/.test(q)) {
+    const issuer = ["brightwave", "riverside"].find((word) => q.includes(word));
+    return toolUseReply("compare_bills", issuer ? { issuer } : { query: guessQuery(q, "") });
+  }
+  if (/mean|explain|ignore|what is this|what's this|summar/.test(q)) {
     return toolUseReply("explain_document", { query: guessQuery(q, "parking notice"), question: said });
   }
   if (/reply|write|letter|email|extension|draft|cancel/.test(q)) {

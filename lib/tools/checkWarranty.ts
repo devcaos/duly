@@ -1,17 +1,17 @@
 import { z } from "zod";
 import { getStorage, HOUSEHOLD_ID } from "@/lib/storage";
-import { daysBetween, formatSpokenDate, todayISO } from "@/lib/dates";
+import { daysBetween, describeDaysLeft, formatSpokenDate, todayISO } from "@/lib/dates";
 import { scoreDocument } from "@/lib/search";
 import { isoDateSchema } from "@/lib/schemas";
 import type { Document, ToolResult } from "@/lib/types";
 
 // A warranty ending in this many days or fewer counts as "expiring soon".
-const EXPIRING_SOON_DAYS = 60;
+export const EXPIRING_SOON_DAYS = 60;
 
 export const WARRANTY_STATUSES = ["active", "expiring_soon", "expired"] as const;
 type WarrantyStatus = (typeof WARRANTY_STATUSES)[number];
 
-const warrantySchema = z.object({
+export const warrantySchema = z.object({
   documentId: z.string(),
   title: z.string(),
   issuer: z.string(),
@@ -35,7 +35,7 @@ export const checkWarrantyOutput = z.object({
   warranties: z.array(warrantySchema).optional(),
 });
 
-type Warranty = z.infer<typeof warrantySchema>;
+export type Warranty = z.infer<typeof warrantySchema>;
 
 // "all", "my warranties", "everything"... mean "list them all", not a product name.
 const GENERIC_PRODUCT =
@@ -65,10 +65,15 @@ export async function runCheckWarranty(input: {
 
   const warranty = toWarranty(best.doc);
   const name = best.doc.product ?? product;
-  const text = warranty.expired
-    ? `Your ${name} warranty from ${warranty.issuer} expired on ${formatSpokenDate(warranty.endDate)}.`
-    : `Yes, your ${name} is under warranty until ${formatSpokenDate(warranty.endDate)}, ${warranty.daysRemaining} days from now. ` +
-      `${warranty.howToClaim[0] ?? ""}`.trim();
+  const end = formatSpokenDate(warranty.endDate);
+  const claim = warranty.howToClaim[0] ?? "";
+  // The status is always said out loud: "expired" and "expiring soon" are what people need to hear.
+  const text =
+    warranty.status === "expired"
+      ? `Your ${name} warranty from ${warranty.issuer} expired on ${end}, ${describeDaysLeft(warranty.daysRemaining)}.`
+      : warranty.status === "expiring_soon"
+        ? `Your ${name} is still under warranty, but it's expiring soon: it ends on ${end}, ${describeDaysLeft(warranty.daysRemaining)}. ${claim}`.trim()
+        : `Yes, your ${name} is under warranty until ${end}, ${warranty.daysRemaining} days from now. ${claim}`.trim();
 
   return { text, structuredContent: { product, found: true, warranty } };
 }
@@ -88,24 +93,31 @@ function listAll(docs: Document[]): ToolResult<z.infer<typeof checkWarrantyOutpu
     .filter(([n]) => Number(n) > 0)
     .map(([n, label]) => `${n} ${label}`);
 
-  // The next one to end is the one worth hearing about.
+  // Worth hearing about: the next one to expire soon and the one that expired last.
+  // With neither, the next one to end.
+  const name = (w: Warranty) => w.product ?? w.title;
+  const expiringSoon = warranties.find((w) => w.status === "expiring_soon");
+  const lastExpired = warranties.findLast((w) => w.status === "expired");
   const next = warranties.find((w) => !w.expired);
-  const nextSentence = next
-    ? ` Your ${next.product ?? next.title} is covered until ${formatSpokenDate(next.endDate)}.`
-    : "";
-  const text =
+  const details = [
+    expiringSoon && `Your ${name(expiringSoon)} warranty is expiring soon, on ${formatSpokenDate(expiringSoon.endDate)}.`,
+    lastExpired && `Your ${name(lastExpired)} warranty expired on ${formatSpokenDate(lastExpired.endDate)}.`,
+  ].filter(Boolean);
+  if (details.length === 0 && next) details.push(`Your ${name(next)} is covered until ${formatSpokenDate(next.endDate)}.`);
+  const counts =
     warranties.length === 1
-      ? `You have one warranty on file, and it's ${parts[0].replace(/^1 /, "")}.${nextSentence}`
-      : `You have ${warranties.length} warranties on file: ${parts.join(", ")}.${nextSentence}`;
+      ? `You have one warranty on file, and it's ${parts[0].replace(/^1 /, "")}.`
+      : `You have ${warranties.length} warranties on file: ${parts.join(", ")}.`;
+  const text = [counts, ...details].join(" ");
 
   return { text, structuredContent: { found: true, warranties } };
 }
 
-function warrantyEnd(doc: Document) {
+export function warrantyEnd(doc: Document) {
   return doc.deadlines.find((d) => d.kind === "warranty_ends");
 }
 
-function toWarranty(doc: Document): Warranty {
+export function toWarranty(doc: Document): Warranty {
   const endDate = warrantyEnd(doc)!.date;
   const daysRemaining = daysBetween(todayISO(), endDate);
   const status: WarrantyStatus =

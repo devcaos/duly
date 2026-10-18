@@ -1,3 +1,4 @@
+import { allBillsByIssuer, docDate, isBillDoc, issuerKey, supersededBillIds } from "@/lib/bills";
 import type { Document } from "@/lib/types";
 
 // Very simple keyword search: good enough for a handful of household documents.
@@ -36,11 +37,31 @@ export function scoreDocument(doc: Document, query: string): number {
   return score;
 }
 
+// An earlier bill never ranks above the latest bill of the same issuer: "my Brightwave bill"
+// means this month's. If the latest bill doesn't match at all, an earlier one keeps its score,
+// so it can still be found on purpose.
 export function searchDocuments(docs: Document[], query: string, limit = 5): Document[] {
+  const scores = new Map(docs.map((doc) => [doc.id, scoreDocument(doc, query)]));
+  const latest = new Map([...allBillsByIssuer(docs)].map(([key, bills]) => [key, bills[0]]));
+  const superseded = supersededBillIds(docs);
+
   return docs
-    .map((doc) => ({ doc, score: scoreDocument(doc, query) }))
+    .map((doc) => {
+      let score = scores.get(doc.id) ?? 0;
+      if (superseded.has(doc.id) && isBillDoc(doc)) {
+        const latestScore = scores.get(latest.get(issuerKey(doc.issuer))?.id ?? "") ?? 0;
+        if (latestScore > 0) score = Math.min(score, latestScore);
+      }
+      return { doc, score, superseded: superseded.has(doc.id) };
+    })
     .filter((r) => r.score > 0)
-    .sort((a, b) => b.score - a.score)
+    // Higher score first; on a tie, current documents before earlier bills, newest earlier bill first.
+    .sort(
+      (a, b) =>
+        b.score - a.score ||
+        Number(a.superseded) - Number(b.superseded) ||
+        (a.superseded ? docDate(b.doc).localeCompare(docDate(a.doc)) : 0),
+    )
     .slice(0, limit)
     .map((r) => r.doc);
 }

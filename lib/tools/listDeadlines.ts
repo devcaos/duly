@@ -2,7 +2,7 @@ import { z } from "zod";
 import { getStorage, HOUSEHOLD_ID } from "@/lib/storage";
 import { addDays, daysBetween, endOfMonth, formatMoney, formatSpokenDate, todayISO } from "@/lib/dates";
 import { deadlineKindSchema, deadlineSchema, isoDateSchema } from "@/lib/schemas";
-import type { DeadlineKind, ToolResult } from "@/lib/types";
+import type { DeadlineKind, Document, ToolResult } from "@/lib/types";
 
 export const deadlineItemSchema = deadlineSchema.extend({
   daysLeft: z.number().int(),
@@ -19,7 +19,20 @@ export const listDeadlinesOutput = z.object({
   deadlines: z.array(deadlineItemSchema),
 });
 
-type DeadlineItem = z.infer<typeof deadlineItemSchema>;
+export type DeadlineItem = z.infer<typeof deadlineItemSchema>;
+
+// Every deadline of every document, with its document and days left (not filtered or sorted).
+export function deadlineItems(docs: Document[], today: string): DeadlineItem[] {
+  return docs.flatMap((doc) =>
+    doc.deadlines.map((deadline) => ({
+      ...deadline,
+      daysLeft: daysBetween(today, deadline.date),
+      documentId: doc.id,
+      documentTitle: doc.title,
+      issuer: doc.issuer,
+    })),
+  );
+}
 
 export async function runListDeadlines(input: {
   from?: string;
@@ -32,16 +45,7 @@ export async function runListDeadlines(input: {
   const to = input.to ?? addDays(from, 30);
 
   const docs = await getStorage().listDocuments(HOUSEHOLD_ID);
-  const deadlines: DeadlineItem[] = docs
-    .flatMap((doc) =>
-      doc.deadlines.map((deadline) => ({
-        ...deadline,
-        daysLeft: daysBetween(today, deadline.date),
-        documentId: doc.id,
-        documentTitle: doc.title,
-        issuer: doc.issuer,
-      })),
-    )
+  const deadlines: DeadlineItem[] = deadlineItems(docs, today)
     // ISO dates compare correctly as strings.
     .filter((d) => d.date >= from && d.date <= to)
     .filter((d) => !input.kind || d.kind === input.kind)
@@ -85,7 +89,7 @@ function spokenTotal(deadlines: DeadlineItem[]): string {
 
 // "$15.00 to Maplewood Elementary, due October 22" or
 // "PeakFit: last day to cancel before the gym membership renews, on October 21"
-function spokenItem(d: DeadlineItem): string {
+export function spokenItem(d: DeadlineItem): string {
   if (d.amount !== undefined) {
     return `${formatMoney(d.amount, d.currency)} to ${d.issuer}, due ${formatSpokenDate(d.date)}`;
   }

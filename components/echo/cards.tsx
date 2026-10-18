@@ -73,6 +73,49 @@ interface MatchesData {
   matches: { id: string; title: string; issuer: string; type: string }[];
 }
 
+interface BillRef {
+  documentId: string;
+  title: string;
+  issueDate: string;
+  amount: number;
+}
+
+interface BillComparison {
+  issuer: string;
+  currency: string;
+  latest: BillRef;
+  previous: BillRef[];
+  previousAmount?: number;
+  percentVsAverage?: number;
+  averageAmount?: number;
+  trend: "higher" | "lower" | "about_the_same" | "no_history";
+}
+
+interface ComparisonData {
+  query?: string;
+  issuer?: string;
+  found: boolean;
+  comparison?: BillComparison;
+  comparisons?: BillComparison[];
+}
+
+interface BriefData {
+  days: number;
+  deadlines: DeadlineItem[];
+  renewals: {
+    documentId: string;
+    title: string;
+    issuer: string;
+    renewalDate: string;
+    cancelBy: string;
+    daysToCancel: number;
+    amount?: number;
+    currency?: string;
+  }[];
+  warrantiesEndingSoon: WarrantyInfo[];
+  higherBills: BillComparison[];
+}
+
 // Each card (or row) fades and slides in a little after the one before it.
 export const STAGGER_MS = 70;
 const BASE_DELAY_MS = 140;
@@ -412,6 +455,182 @@ export function MatchesCard({ data }: { data: Record<string, unknown> }) {
           </div>
         </div>
       ))}
+    </div>
+  );
+}
+
+// "+22% vs usual" (amber when higher than usual), "About usual", "No history".
+function ChangePill({ comparison }: { comparison: BillComparison }) {
+  const pct = comparison.percentVsAverage;
+  if (comparison.trend === "no_history" || pct === undefined) return <span className={styles.pill}>No history</span>;
+  if (comparison.trend === "about_the_same") return <span className={styles.pill}>About usual</span>;
+  const tone = comparison.trend === "higher" ? styles.pillUrgent : "";
+  return (
+    <span className={`${styles.pill} ${tone}`}>
+      {pct > 0 ? "+" : "−"}
+      {Math.round(Math.abs(pct))}% vs usual
+    </span>
+  );
+}
+
+export function ComparisonCard({ data }: { data: Record<string, unknown> }) {
+  const { comparison, comparisons, issuer, query } = data as unknown as ComparisonData;
+  if (comparisons) return <ComparisonList comparisons={comparisons} />;
+  if (!comparison) {
+    return (
+      <div className={`${styles.card} ${styles.emptyCard} ${styles.enter}`} style={enterStyle(0)}>
+        No bills to compare for “{issuer ?? query}”.
+      </div>
+    );
+  }
+
+  // Newest first, each bar relative to the biggest bill.
+  const bills = [comparison.latest, ...comparison.previous];
+  const max = Math.max(...bills.map((bill) => bill.amount), 1);
+  return (
+    <div className={styles.stack}>
+      <div className={`${styles.card} ${styles.warranty} ${styles.enter}`} style={enterStyle(0)}>
+        <div className={styles.warrantyHead}>
+          <div>
+            <div className={styles.eyebrow}>Bill comparison</div>
+            <h3 className={styles.warrantyProduct}>{comparison.issuer}</h3>
+            <div className={styles.billPill}>
+              <ChangePill comparison={comparison} />
+            </div>
+          </div>
+          <div className={styles.bigNumber}>
+            <span>
+              <CountUp value={comparison.latest.amount} delay={delayFor(0)} format={(n) => formatMoney(n, comparison.currency)} />
+            </span>
+            <small>latest bill</small>
+          </div>
+        </div>
+        {bills.map((bill, i) => (
+          <div key={bill.documentId} className={styles.billRow}>
+            <div className={styles.barLabels}>
+              <span>{i === 0 ? `Latest · ${formatSpokenDate(bill.issueDate)}` : formatSpokenDate(bill.issueDate)}</span>
+              <span>{formatMoney(bill.amount, comparison.currency)}</span>
+            </div>
+            <div className={styles.bar} role="img" aria-label={`${formatMoney(bill.amount, comparison.currency)} bill`}>
+              <div
+                className={`${styles.barFill} ${i === 0 && comparison.trend === "higher" ? styles.barUrgent : ""}`}
+                style={{ "--fill": bill.amount / max } as CSSProperties}
+              />
+            </div>
+          </div>
+        ))}
+      </div>
+      {comparison.averageAmount !== undefined && (
+        <div className={`${styles.listFooter} ${styles.enter}`} style={enterStyle(1)}>
+          <span>
+            Usual <strong className={styles.amount}>{formatMoney(comparison.averageAmount, comparison.currency)}</strong>
+          </span>
+          {comparison.previousAmount !== undefined && (
+            <span>
+              Previous <strong className={styles.amount}>{formatMoney(comparison.previousAmount, comparison.currency)}</strong>
+            </span>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// One row per company: latest amount and the change vs usual.
+function ComparisonList({ comparisons }: { comparisons: BillComparison[] }) {
+  if (comparisons.length === 0) {
+    return (
+      <div className={`${styles.card} ${styles.emptyCard} ${styles.enter}`} style={enterStyle(0)}>
+        Not enough bills to compare yet.
+      </div>
+    );
+  }
+  return (
+    <div className={styles.stack}>
+      {comparisons.map((comparison, i) => (
+        <BillChangeRow key={comparison.latest.documentId} comparison={comparison} index={i} />
+      ))}
+    </div>
+  );
+}
+
+function BillChangeRow({ comparison, index }: { comparison: BillComparison; index: number }) {
+  return (
+    <div className={`${styles.card} ${styles.matchRow} ${styles.enter}`} style={enterStyle(index)}>
+      <div className={styles.warrantyRowHead}>
+        <div>
+          <div className={styles.deadlineTitle}>{comparison.issuer}</div>
+          <div className={styles.deadlineIssuer}>
+            {comparison.averageAmount !== undefined
+              ? `Usual ${formatMoney(comparison.averageAmount, comparison.currency)}`
+              : "First bill on file"}
+          </div>
+        </div>
+        <div className={styles.deadlineMeta}>
+          <span className={styles.amount}>{formatMoney(comparison.latest.amount, comparison.currency)}</span>
+          <ChangePill comparison={comparison} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// The weekly brief: what's due, renewals you can still cancel, warranties ending soon and bills
+// higher than usual. Renewals and warranties reuse the deadline row (date, text, days left).
+export function BriefCard({ data }: { data: Record<string, unknown> }) {
+  const brief = data as unknown as BriefData;
+  const renewals: DeadlineItem[] = brief.renewals.map((r) => ({
+    date: r.cancelBy,
+    kind: "renewal",
+    description: `Cancel before it renews on ${formatSpokenDate(r.renewalDate)}`,
+    amount: r.amount,
+    currency: r.currency,
+    daysLeft: r.daysToCancel,
+    documentTitle: r.title,
+    issuer: r.issuer,
+  }));
+  const warranties: DeadlineItem[] = brief.warrantiesEndingSoon.map((w) => ({
+    date: w.endDate,
+    kind: "warranty_ends",
+    description: `${w.product ?? w.title} warranty ends`,
+    daysLeft: w.daysRemaining,
+    documentTitle: w.title,
+    issuer: w.issuer,
+  }));
+
+  // One flat list (headings and rows), so every row gets the next stagger delay.
+  type Row =
+    | { kind: "heading"; title: string }
+    | { kind: "deadline"; item: DeadlineItem }
+    | { kind: "bill"; comparison: BillComparison };
+  const section = (title: string, rows: Row[]): Row[] => (rows.length > 0 ? [{ kind: "heading", title }, ...rows] : []);
+  const rows: Row[] = [
+    ...section("Due soon", brief.deadlines.slice(0, VISIBLE_DEADLINES).map((item) => ({ kind: "deadline", item }))),
+    ...section("Renewals you can cancel", renewals.map((item) => ({ kind: "deadline", item }))),
+    ...section("Warranties ending soon", warranties.map((item) => ({ kind: "deadline", item }))),
+    ...section("Higher than usual", brief.higherBills.map((comparison) => ({ kind: "bill", comparison }))),
+  ];
+
+  if (rows.length === 0) {
+    return (
+      <div className={`${styles.card} ${styles.emptyCard} ${styles.enter}`} style={enterStyle(0)}>
+        Nothing needs your attention in the next {brief.days} days. Enjoy the quiet.
+      </div>
+    );
+  }
+  return (
+    <div className={styles.stack}>
+      {rows.map((row, i) =>
+        row.kind === "heading" ? (
+          <div key={row.title} className={`${styles.eyebrow} ${styles.briefHeading} ${styles.enter}`} style={enterStyle(i)}>
+            {row.title}
+          </div>
+        ) : row.kind === "deadline" ? (
+          <DeadlineRow key={`${row.item.kind}-${row.item.date}-${row.item.issuer}-${row.item.description}`} item={row.item} index={i} compact />
+        ) : (
+          <BillChangeRow key={`bill-${row.comparison.latest.documentId}`} comparison={row.comparison} index={i} />
+        ),
+      )}
     </div>
   );
 }

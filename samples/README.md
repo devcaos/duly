@@ -4,7 +4,8 @@ Clearly fictional documents for the Duly demo (SPEC.md section 8). Every brand,
 person, address and number is made up, and every page carries a "SAMPLE" mark.
 
 Documents 1-6 match the seed data in `lib/storage/seed.ts` (same issuers, amounts,
-numbers and day offsets). Document 7 is extra, for the live upload demo.
+numbers and day offsets). Document 7 is extra, for the live upload demo. The seed also has
+eight documents without a sample file (see "Seed-only documents" below).
 
 **Generated on 2026-10-17.** Dates are relative to that day, like the seed. Regenerate on
 demo day so the dates on paper match the seed and every deadline is upcoming:
@@ -129,3 +130,23 @@ Files: `07-riverside-water-bill.png`, `07-riverside-water-bill.pdf`
 | Amount due | $56.75 USD |
 | Due date (payment_due) | 2026-10-31 (today + 14, "pay within 14 days") |
 | Late fee | $5.00 |
+
+## Seed-only documents (no sample file)
+
+These documents are only in `lib/storage/seed.ts`, for `check_warranty`, `compare_bills` and
+`weekly_brief`. Offsets are days from today.
+
+| Seed document | What it is | Key facts |
+| --- | --- | --- |
+| `doc-visionmax-tv` | VisionMax 55-inch TV receipt | Receipt VM-20417, bought today - 200, $649.00, 3-year warranty ends today + 895 (active) |
+| `doc-frostline-fridge` | FrostLine refrigerator receipt (product `fridge`) | Receipt FL-88310, bought today - 345, $1,199.00, 1-year warranty ends today + 20 (expiring soon) |
+| `doc-aquaspin-washer` | AquaSpin washing machine receipt | Receipt AS-41562, bought today - 760, $479.00, 2-year warranty ended today - 30 (expired) |
+| `doc-pinewood-laptop` | Pinewood Computers laptop receipt | Receipt PW-60294, bought today - 365, $899.00, 2-year warranty ends today + 365 (active) |
+| `doc-brightwave-bill-prev-1` | Earlier Brightwave Energy bill, paid | Issued today - 42, $70.10, no deadlines |
+| `doc-brightwave-bill-prev-2` | Earlier Brightwave Energy bill, paid | Issued today - 73, $68.40, no deadlines |
+| `doc-riverside-water-prev-1` | Earlier Riverside Water Company bill, paid | Issued today - 30, $55.90, no deadlines |
+| `doc-riverside-water-prev-2` | Earlier Riverside Water Company bill, paid | Issued today - 61, $54.30, no deadlines |
+
+Expected comparisons: Brightwave $84.20 is about 22% higher than the usual $69.25 (average of
+$70.10 and $68.40) and $14.10 more than the previous bill. After uploading sample 7 ($56.75),
+Riverside is about the same as usual ($55.10).

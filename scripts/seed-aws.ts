@@ -1,5 +1,5 @@
 // Resets the demo household in DynamoDB: deletes every document, then writes the
-// 6 sample documents with dates relative to today. Run it again on demo day.
+// sample documents (lib/storage/seed.ts) with dates relative to today. Run it again on demo day.
 // Original files already in S3 are kept (they are only referenced by deleted documents).
 // Usage: npm run seed:aws   (run npm run setup:aws once before)
 
