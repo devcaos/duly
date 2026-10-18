@@ -246,6 +246,10 @@ Host check: `/api/mcp` answers only when the `Host` header is `localhost`, `127.
 - No sign-in: one demo household with fictional data only. Don't upload real documents to the public deployment.
 - Rate limits are in memory, per server instance.
 
+## Related
+
+[mcp-bedrock-bridge](https://github.com/devcaos/mcp-bedrock-bridge) is a zero-dependency TypeScript library that turns MCP tools into Bedrock Converse tool configs with Nova-safe schemas, and MCP results into valid `toolResult` blocks. Its tests reproduce the text + json tool result failure from `FRICTION.md` with real numbers: 1,170 → 90 input tokens and no `toolUse`.
+
 ## License
 
 [MIT](LICENSE)

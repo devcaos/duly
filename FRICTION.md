@@ -89,3 +89,24 @@ One entry per problem with an Amazon/AWS/MCP tool, SDK or doc. Write it when it 
 - **Severity:** major (most demo questions got the "I can help with..." sentence)
 - **Workaround:** A tool result with a document is now one `json` block, `{ result, document_id }`; other results are text only (`lib/agent/agent.ts`). A/B results: text + json → 419 input tokens, text answer; single json → 2,490 tokens, `check_warranty`. The mock (`scripts/mock-aws.mjs`) now copies the real behavior and answers in text when a tool result mixes the two. `npm run smoke:bedrock` sends questions that come after a document turn.
 - **Suggestion:** Reject a `ToolResultBlock` that mixes `text` and `json` with a `ValidationException`, as Bedrock does for other invalid content, or at least warn about it. Say clearly on the Converse tool-use page which content combinations each model accepts.
+- **Update (reproduced in isolation):** Reproduced with mcp-bedrock-bridge's `npm run test:bedrock` (minimal in-process MCP server, `eu.amazon.nova-2-lite-v1:0`, `eu-west-1`, temperature 0, same numbers in 3 runs). Same history, only the `toolResult` shape changed: single `json` block → 1,170 input tokens and a `toolUse`; `[text, json]` → 90 input tokens, `stopReason: end_turn`, no `toolUse` with `toolChoice` `auto` or `any`. The model wrote the tool arguments as text (`{"order_id":"B-7"}`) and then said it couldn't find the order. Still no error from Bedrock.
+
+### Nova 2 docs leave out the tool schema and tool result rules
+- **Tool / API / SDK:** Amazon Nova 2 User Guide ("Using tools") vs Amazon Nova (v1) User Guide ("Defining a tool", "Returning tool results")
+- **Task I attempted:** Write down, with sources, which tool schemas and `toolResult` contents Nova 2 Lite accepts.
+- **Steps I took:** Read the Nova 2 "Using tools" page, the Nova v1 tool-use pages and the Bedrock API Reference.
+- **Expected:** The Nova 2 page states the rules for Nova 2 models.
+- **What actually happened:** Two rules are only in the v1 guide: "only type, properties and required at the root" and "The contents of the ToolResultBlock should be either a single JSON or a mix of text and images". The Nova 2 page only shows single-`json` examples, and its schema example uses `minimum`/`maximum` and `["number","null"]`, so it isn't clear which keywords Nova 2 accepts.
+- **Severity:** minor
+- **Workaround:** Follow the v1 rules conservatively and verify with real calls (`npm run test:bedrock` in mcp-bedrock-bridge).
+- **Suggestion:** Add a "Tool schema and tool result constraints" section to the Nova 2 guide with the accepted JSON Schema keywords and allowed content combinations.
+
+### MCP SDK v1: `callTool` returns a union with the legacy format
+- **Tool / API / SDK:** `@modelcontextprotocol/sdk` 1.32.1, `Client.callTool`
+- **Task I attempted:** Pass the result of `client.callTool(...)` to a function that reads `content` and `structuredContent`.
+- **Steps I took:** Called `client.callTool(...)` and passed the result to that function.
+- **Expected:** `callTool` returns `CallToolResult`.
+- **What actually happened:** The return type is `CallToolResult | { toolResult: unknown }` (pre-2025 format), so `result.content` doesn't type-check without a guard or a cast, even against current servers.
+- **Severity:** minor
+- **Workaround:** mcp-bedrock-bridge also accepts the legacy shape and treats `toolResult` like `structuredContent`.
+- **Suggestion:** An overload that returns only `CallToolResult` when the negotiated protocol is current, or a type guard exported by the SDK.
