@@ -1,4 +1,5 @@
 import { getStorage, HOUSEHOLD_ID } from "@/lib/storage";
+import { supersededBillIds } from "@/lib/bills";
 import { searchDocuments } from "@/lib/search";
 import type { Document } from "@/lib/types";
 
@@ -21,8 +22,13 @@ export async function resolveDocument(input: { document_id?: string; query?: str
     const issuer = input.issuer.trim().toLowerCase();
     const fromIssuer = docs.filter((doc) => doc.issuer.toLowerCase().includes(issuer));
     // Several documents from the same sender: let the keywords pick, else take the newest.
+    // Earlier bills only count when nothing else from that sender is left.
     const [byQuery] = input.query ? searchDocuments(fromIssuer, input.query, 1) : [];
-    const newest = [...fromIssuer].sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
+    const superseded = supersededBillIds(docs);
+    const current = fromIssuer.filter((doc) => !superseded.has(doc.id));
+    const newest = [...(current.length > 0 ? current : fromIssuer)].sort((a, b) =>
+      b.createdAt.localeCompare(a.createdAt),
+    )[0];
     if (byQuery ?? newest) return byQuery ?? newest;
   }
 

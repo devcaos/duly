@@ -1,10 +1,15 @@
 import type { Document } from "@/lib/types";
 import { addDays } from "@/lib/dates";
 
-// Six fictional sample documents (SPEC.md section 8).
+// Fictional sample documents (SPEC.md section 8): the six demo documents, four more
+// warranties (active, expiring soon, expired) and earlier bills for compare_bills.
 // All dates are relative to `today`, so the deadlines are always upcoming.
+// Earlier bills are already paid: they have no deadlines, so they never show up as due.
 export function buildSeedDocuments(today: string): Document[] {
   const d = (days: number) => addDays(today, days);
+  // "September": tells earlier bills apart in titles and search.
+  const month = (iso: string) =>
+    new Date(`${iso}T00:00:00Z`).toLocaleDateString("en-US", { month: "long", timeZone: "UTC" });
   const createdAt = `${today}T09:00:00.000Z`;
   const base = { householdId: "demo", createdAt };
 
@@ -172,6 +177,138 @@ export function buildSeedDocuments(today: string): Document[] {
         "Send the form and $15 to school with your child before the deadline.",
       ],
       rawText: `SAMPLE - Maplewood Elementary School. Field trip permission form. Grade 3, Science Museum visit on ${d(18)}. Fee: $15.00. Return signed form and fee by ${d(5)}.`,
+    },
+    {
+      ...base,
+      id: "doc-visionmax-tv",
+      type: "warranty",
+      title: "VisionMax 55-inch TV receipt (SAMPLE)",
+      issuer: "VisionMax",
+      issueDate: d(-200),
+      amount: 649,
+      currency: "USD",
+      product: "TV",
+      deadlines: [{ date: d(895), kind: "warranty_ends", description: "3-year TV warranty ends" }],
+      summary:
+        "Purchase receipt for a VisionMax 55-inch 4K television, $649.00, with a 3-year manufacturer warranty covering parts, labor and the screen panel.",
+      actionItems: [
+        "To claim: call VisionMax support at 1-800-555-0123 or open a claim at visionmax.example/support.",
+        "Have the receipt number VM-20417 and the TV's serial number (on the back label) ready.",
+      ],
+      rawText: `SAMPLE - VisionMax. Receipt VM-20417. Date: ${d(-200)}. VisionMax 55-inch 4K television, $649.00. 3-year warranty (parts, labor and panel) until ${d(895)}. Support: 1-800-555-0123.`,
+    },
+    {
+      ...base,
+      id: "doc-frostline-fridge",
+      type: "warranty",
+      title: "FrostLine refrigerator receipt (SAMPLE)",
+      issuer: "FrostLine",
+      issueDate: d(-345),
+      amount: 1199,
+      currency: "USD",
+      product: "fridge",
+      deadlines: [{ date: d(20), kind: "warranty_ends", description: "1-year fridge warranty ends" }],
+      summary:
+        "Purchase receipt for a FrostLine FL-600 refrigerator, $1,199.00, with a 1-year manufacturer warranty covering parts and labor.",
+      actionItems: [
+        "To claim: call FrostLine at 1-800-555-0134 or visit frostline.example/claims before the warranty ends.",
+        "Have the receipt number FL-88310 and the model number FL-600 ready.",
+      ],
+      rawText: `SAMPLE - FrostLine. Receipt FL-88310. Date: ${d(-345)}. FrostLine FL-600 refrigerator (fridge), $1,199.00. 1-year warranty (parts and labor) until ${d(20)}. Claims: 1-800-555-0134.`,
+    },
+    {
+      ...base,
+      id: "doc-aquaspin-washer",
+      type: "warranty",
+      title: "AquaSpin washing machine receipt (SAMPLE)",
+      issuer: "AquaSpin",
+      issueDate: d(-760),
+      amount: 479,
+      currency: "USD",
+      product: "washing machine",
+      deadlines: [{ date: d(-30), kind: "warranty_ends", description: "2-year washing machine warranty ends" }],
+      summary:
+        "Purchase receipt for an AquaSpin 8 kg washing machine, $479.00, with a 2-year manufacturer warranty covering parts and labor.",
+      actionItems: [
+        "To claim: call AquaSpin at 1-800-555-0156 or visit aquaspin.example/service.",
+        "Have the receipt number AS-41562 and the washer's serial number ready.",
+      ],
+      rawText: `SAMPLE - AquaSpin. Receipt AS-41562. Date: ${d(-760)}. AquaSpin 8 kg washing machine (washer), $479.00. 2-year warranty (parts and labor) until ${d(-30)}. Service: 1-800-555-0156.`,
+    },
+    {
+      ...base,
+      id: "doc-pinewood-laptop",
+      type: "warranty",
+      title: "Pinewood Computers laptop receipt (SAMPLE)",
+      issuer: "Pinewood Computers",
+      issueDate: d(-365),
+      amount: 899,
+      currency: "USD",
+      product: "laptop",
+      deadlines: [{ date: d(365), kind: "warranty_ends", description: "2-year laptop warranty ends" }],
+      summary:
+        "Purchase receipt for a Pinewood Air 14 laptop, $899.00, with a 2-year manufacturer warranty covering hardware defects.",
+      actionItems: [
+        "To claim: call Pinewood Computers at 1-800-555-0168 or start a repair at pinewood.example/repair.",
+        "Have the receipt number PW-60294 and the laptop's serial number ready.",
+      ],
+      rawText: `SAMPLE - Pinewood Computers. Receipt PW-60294. Date: ${d(-365)}. Pinewood Air 14 laptop, $899.00. 2-year warranty (hardware defects) until ${d(365)}. Repairs: 1-800-555-0168.`,
+    },
+    {
+      ...base,
+      id: "doc-brightwave-bill-prev-1",
+      type: "bill",
+      title: `Brightwave Energy electricity bill, ${month(d(-42))} (SAMPLE)`,
+      issuer: "Brightwave Energy",
+      issueDate: d(-42),
+      amount: 70.1,
+      currency: "USD",
+      deadlines: [],
+      summary: "Earlier monthly electricity bill for 351 kWh. Total $70.10. Paid.",
+      actionItems: [],
+      rawText: `SAMPLE - Brightwave Energy. Electricity bill. Account BW-4471-2209. Issued ${d(-42)}. Usage: 351 kWh. Amount due: $70.10. Due date: ${d(-21)}. Status: paid.`,
+    },
+    {
+      ...base,
+      id: "doc-brightwave-bill-prev-2",
+      type: "bill",
+      title: `Brightwave Energy electricity bill, ${month(d(-73))} (SAMPLE)`,
+      issuer: "Brightwave Energy",
+      issueDate: d(-73),
+      amount: 68.4,
+      currency: "USD",
+      deadlines: [],
+      summary: "Earlier monthly electricity bill for 342 kWh. Total $68.40. Paid.",
+      actionItems: [],
+      rawText: `SAMPLE - Brightwave Energy. Electricity bill. Account BW-4471-2209. Issued ${d(-73)}. Usage: 342 kWh. Amount due: $68.40. Due date: ${d(-52)}. Status: paid.`,
+    },
+    {
+      ...base,
+      id: "doc-riverside-water-prev-1",
+      type: "bill",
+      title: `Riverside Water Company water bill, ${month(d(-30))} (SAMPLE)`,
+      issuer: "Riverside Water Company",
+      issueDate: d(-30),
+      amount: 55.9,
+      currency: "USD",
+      deadlines: [],
+      summary: "Earlier water bill for 4,100 gallons. Total $55.90. Paid.",
+      actionItems: [],
+      rawText: `SAMPLE - Riverside Water Company. Water bill. Account RW-1180-33. Issued ${d(-30)}. Usage: 4,100 gallons. Amount due: $55.90. Due date: ${d(-16)}. Status: paid.`,
+    },
+    {
+      ...base,
+      id: "doc-riverside-water-prev-2",
+      type: "bill",
+      title: `Riverside Water Company water bill, ${month(d(-61))} (SAMPLE)`,
+      issuer: "Riverside Water Company",
+      issueDate: d(-61),
+      amount: 54.3,
+      currency: "USD",
+      deadlines: [],
+      summary: "Earlier water bill for 3,950 gallons. Total $54.30. Paid.",
+      actionItems: [],
+      rawText: `SAMPLE - Riverside Water Company. Water bill. Account RW-1180-33. Issued ${d(-61)}. Usage: 3,950 gallons. Amount due: $54.30. Due date: ${d(-47)}. Status: paid.`,
     },
   ];
 }
