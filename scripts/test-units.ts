@@ -15,9 +15,15 @@ import type { LlmAdapter } from "../lib/llm";
 import { getStorage, HOUSEHOLD_ID } from "../lib/storage";
 import { buildSeedDocuments } from "../lib/storage/seed";
 import { runCheckWarranty } from "../lib/tools/checkWarranty";
-import { fromItem, toItem } from "../lib/storage/aws";
+import { GetCommand, QueryCommand } from "@aws-sdk/lib-dynamodb";
+import type { DynamoDBDocumentClient } from "@aws-sdk/lib-dynamodb";
+import { setDynamoForTests } from "../lib/aws";
+import { AwsStorage, fromItem, fromStoredItem, toItem } from "../lib/storage/aws";
+import { liveDocuments, mergeWithSeed, pickDocument, UPLOAD_TTL_SECONDS, uploadExpiresAt } from "../lib/storage/merge";
+import { MemoryStorage } from "../lib/storage/memory";
 import { compareIssuerBills, isNoticeablyHigher, runCompareBills, usageSentence } from "../lib/tools/compareBills";
 import { DISPUTE_RULE, findProblems, isDisputeIntent, runDraftReply, templateDraft } from "../lib/tools/draftReply";
+import { runAddDocument } from "../lib/tools/addDocument";
 import { runListDeadlines } from "../lib/tools/listDeadlines";
 import { resolveDocument } from "../lib/tools/resolveDocument";
 import { runWeeklyBrief } from "../lib/tools/weeklyBrief";
@@ -441,6 +447,160 @@ async function checkAsync(name: string, fn: () => Promise<void>) {
 
 const hasPrev = (ids: string[]) => ids.some((id) => id.includes("-prev-"));
 
+// Virtual seed: rebuilt from the request's date on every read, never taken from storage.
+const BRIGHTWAVE = "doc-brightwave-bill";
+const brightwaveDue = (docs: Document[]) => docs.find((doc) => doc.id === BRIGHTWAVE)!.deadlines[0].date;
+function upload(id: string): Document {
+  return { ...bill(id, 40, 0), householdId: HOUSEHOLD_ID };
+}
+
+async function seedChecks() {
+  await checkAsync("seed dates follow the injected today at read time", async () => {
+    // The Brightwave bill is due today + 9.
+    assert.equal(brightwaveDue(mergeWithSeed(HOUSEHOLD_ID, [], "2026-11-15")), "2026-11-24");
+    assert.equal(brightwaveDue(mergeWithSeed(HOUSEHOLD_ID, [], "2026-11-20")), "2026-11-29");
+    assert.equal(mergeWithSeed(HOUSEHOLD_ID, [], "2026-11-15").length, buildSeedDocuments("2026-11-15").length);
+  });
+
+  await checkAsync("the seed wins over a stored copy with the same id (stale dates)", async () => {
+    const stale = { ...buildSeedDocuments("2026-10-21").find((doc) => doc.id === BRIGHTWAVE)!, title: "Stale copy" };
+    const docs = mergeWithSeed(HOUSEHOLD_ID, [stale], "2026-11-15");
+    const copies = docs.filter((doc) => doc.id === BRIGHTWAVE);
+    assert.equal(copies.length, 1);
+    assert.equal(copies[0].title, "Brightwave Energy electricity bill (SAMPLE)");
+    assert.equal(copies[0].deadlines[0].date, "2026-11-24");
+  });
+
+  await checkAsync("stored documents that are not in the seed are added (own household only)", async () => {
+    const docs = mergeWithSeed(HOUSEHOLD_ID, [upload("doc-unit-a"), bill("doc-unit-other-household", 1, 0)], "2026-11-15");
+    assert.equal(docs.length, buildSeedDocuments("2026-11-15").length + 1);
+    assert.ok(docs.some((doc) => doc.id === "doc-unit-a"));
+    assert.ok(!docs.some((doc) => doc.id === "doc-unit-other-household"));
+  });
+
+  await checkAsync("pickDocument: seed ids come from the seed, other ids from storage", async () => {
+    let loads = 0;
+    const load = (doc?: Document) => async () => {
+      loads++;
+      return doc;
+    };
+    const stale = { ...buildSeedDocuments("2026-10-21").find((doc) => doc.id === BRIGHTWAVE)!, title: "Stale copy" };
+    const seeded = await pickDocument(HOUSEHOLD_ID, BRIGHTWAVE, "2026-11-15", load(stale));
+    assert.equal(seeded?.deadlines[0].date, "2026-11-24");
+    assert.equal(seeded?.title, "Brightwave Energy electricity bill (SAMPLE)");
+    assert.equal(loads, 0); // seed reads never touch storage
+    assert.equal((await pickDocument(HOUSEHOLD_ID, "doc-unit-a", "2026-11-15", load(upload("doc-unit-a"))))?.id, "doc-unit-a");
+    assert.equal(await pickDocument(HOUSEHOLD_ID, "doc-unit-missing", "2026-11-15", load()), undefined);
+    assert.equal(loads, 2);
+  });
+
+  await checkAsync("MemoryStorage: today's seed, stored copies of seed ids ignored, uploads kept", async () => {
+    const storage = new MemoryStorage();
+    const today = todayISO();
+    const stale = { ...buildSeedDocuments(addDays(today, -30)).find((doc) => doc.id === BRIGHTWAVE)!, title: "Stale copy" };
+    await storage.saveDocument(stale);
+    await storage.saveDocument(upload("doc-unit-a"));
+    const docs = await storage.listDocuments(HOUSEHOLD_ID);
+    assert.equal(brightwaveDue(docs), addDays(today, 9));
+    assert.equal(docs.length, buildSeedDocuments(today).length + 1);
+    assert.equal((await storage.getDocument(HOUSEHOLD_ID, BRIGHTWAVE))?.title, "Brightwave Energy electricity bill (SAMPLE)");
+    assert.equal((await storage.getDocument(HOUSEHOLD_ID, "doc-unit-a"))?.id, "doc-unit-a");
+  });
+
+  await checkAsync("uploads expire after 24 hours: expired ones are hidden, fresh ones shown", async () => {
+    const now = Date.parse("2026-11-15T12:00:00Z");
+    assert.equal(uploadExpiresAt(now), now / 1000 + UPLOAD_TTL_SECONDS);
+    assert.equal(UPLOAD_TTL_SECONDS, 86_400);
+    const stored = [
+      { doc: upload("doc-unit-expired"), expiresAt: now / 1000 - 1 },
+      { doc: upload("doc-unit-just-expired"), expiresAt: now / 1000 },
+      { doc: upload("doc-unit-fresh"), expiresAt: uploadExpiresAt(now) },
+      { doc: upload("doc-unit-no-expiry") },
+    ];
+    assert.deepEqual(
+      liveDocuments(stored, now).map((doc) => doc.id),
+      ["doc-unit-fresh", "doc-unit-no-expiry"],
+    );
+    // A fresh upload is hidden one day later.
+    assert.deepEqual(liveDocuments(stored, now + UPLOAD_TTL_SECONDS * 1000).map((doc) => doc.id), ["doc-unit-no-expiry"]);
+  });
+
+  await checkAsync("MemoryStorage hides expired uploads in lists and lookups", async () => {
+    const storage = new MemoryStorage();
+    const nowSeconds = Math.floor(Date.now() / 1000);
+    await storage.saveDocument(upload("doc-unit-expired"), { expiresAt: nowSeconds - 60 });
+    await storage.saveDocument(upload("doc-unit-fresh"), { expiresAt: uploadExpiresAt(Date.now()) });
+    const ids = (await storage.listDocuments(HOUSEHOLD_ID)).map((doc) => doc.id);
+    assert.ok(ids.includes("doc-unit-fresh"));
+    assert.ok(!ids.includes("doc-unit-expired"));
+    assert.equal(await storage.getDocument(HOUSEHOLD_ID, "doc-unit-expired"), undefined);
+    const fresh = await storage.getDocument(HOUSEHOLD_ID, "doc-unit-fresh");
+    assert.equal(fresh?.id, "doc-unit-fresh");
+    assert.equal("expiresAt" in fresh!, false);
+  });
+
+  await checkAsync("DynamoDB items: toItem writes expiresAt, fromItem leaves it out of the document", async () => {
+    const doc = upload("doc-unit-a");
+    assert.equal(toItem(doc, 1_800_000_000).expiresAt, 1_800_000_000);
+    assert.equal("expiresAt" in toItem(doc), false);
+    assert.deepEqual(fromItem(toItem(doc, 1_800_000_000)), doc);
+    assert.deepEqual(fromStoredItem(toItem(doc, 1_800_000_000)), { doc, expiresAt: 1_800_000_000 });
+    assert.deepEqual(fromStoredItem(toItem(doc)), { doc, expiresAt: undefined });
+  });
+
+  await checkAsync("AwsStorage: today's seed, expired uploads hidden, valid and legacy uploads kept", async () => {
+    const today = todayISO();
+    const nowSeconds = Math.floor(Date.now() / 1000);
+    const stale = { ...buildSeedDocuments(addDays(today, -30)).find((doc) => doc.id === BRIGHTWAVE)!, title: "Stale copy" };
+    // What an older seed script and add_document left in the table.
+    const items = [
+      toItem(upload("doc-unit-aws-expired"), nowSeconds - 60),
+      toItem(stale),
+      toItem(upload("doc-unit-aws-fresh"), uploadExpiresAt(Date.now())),
+      toItem(upload("doc-unit-aws-legacy")),
+    ];
+    let gets = 0;
+    const fakeDynamo = {
+      async send(command: QueryCommand | GetCommand) {
+        if (command instanceof QueryCommand) {
+          const pk = command.input.ExpressionAttributeValues?.[":pk"];
+          return { Items: items.filter((item) => item.pk === pk) };
+        }
+        gets++;
+        const { pk, sk } = command.input.Key!;
+        return { Item: items.find((item) => item.pk === pk && item.sk === sk) };
+      },
+    };
+    setDynamoForTests(fakeDynamo as unknown as DynamoDBDocumentClient);
+    try {
+      const storage = new AwsStorage();
+      const docs = await storage.listDocuments(HOUSEHOLD_ID);
+      const ids = docs.map((doc) => doc.id);
+      assert.equal(docs.length, buildSeedDocuments(today).length + 2);
+      assert.equal(docs.filter((doc) => doc.id === BRIGHTWAVE).length, 1);
+      assert.equal(brightwaveDue(docs), addDays(today, 9));
+      assert.ok(!docs.some((doc) => doc.title === "Stale copy"));
+      assert.ok(ids.includes("doc-unit-aws-fresh"));
+      assert.ok(ids.includes("doc-unit-aws-legacy"));
+      assert.ok(!ids.includes("doc-unit-aws-expired"));
+      assert.doesNotMatch(JSON.stringify(docs), /expiresAt/);
+
+      const seeded = await storage.getDocument(HOUSEHOLD_ID, BRIGHTWAVE);
+      assert.equal(seeded?.title, "Brightwave Energy electricity bill (SAMPLE)");
+      assert.equal(seeded?.deadlines[0].date, addDays(today, 9));
+      assert.equal(gets, 0); // seed ids never read the table
+      assert.equal(await storage.getDocument(HOUSEHOLD_ID, "doc-unit-aws-expired"), undefined);
+      const fresh = await storage.getDocument(HOUSEHOLD_ID, "doc-unit-aws-fresh");
+      assert.equal(fresh?.id, "doc-unit-aws-fresh");
+      assert.equal((await storage.getDocument(HOUSEHOLD_ID, "doc-unit-aws-legacy"))?.id, "doc-unit-aws-legacy");
+      assert.equal(await storage.getDocument(HOUSEHOLD_ID, "doc-unit-aws-missing"), undefined);
+      assert.doesNotMatch(JSON.stringify([seeded, fresh]), /expiresAt/);
+    } finally {
+      setDynamoForTests(undefined);
+    }
+  });
+}
+
 // Tools on the in-memory seed (dates relative to today).
 async function storageChecks() {
   process.env.STORAGE = "memory";
@@ -616,9 +776,49 @@ async function storageChecks() {
     const water = await runCompareBills({ query: "water bill" });
     assert.notEqual(water.structuredContent.comparison?.latest.documentId, noAmount.id);
   });
+
+  // Also saves into the shared store (a letter, so it changes no bill or deadline check above).
+  await checkAsync("add_document stores a 24-hour expiry that never shows in its result", async () => {
+    const fake: LlmAdapter = {
+      async generateJson<T>(): Promise<T> {
+        return {
+          type: "other",
+          title: "Unit test letter",
+          issuer: "Unit Test Sender",
+          deadlines: [],
+          summary: "A test letter.",
+          actionItems: [],
+          rawText: "A test letter.",
+        } as T;
+      },
+    };
+    const storage = getStorage();
+    const save = storage.saveDocument.bind(storage);
+    let expiresAt: number | undefined;
+    storage.saveDocument = async (doc, options) => {
+      expiresAt = options?.expiresAt;
+      return save(doc, options);
+    };
+    setLlmForTests(fake);
+    try {
+      const before = Date.now();
+      const result = await runAddDocument({ text: "A test letter." });
+      assert.ok(expiresAt! >= uploadExpiresAt(before) && expiresAt! <= uploadExpiresAt(Date.now()));
+      assert.doesNotMatch(JSON.stringify(result), /expiresAt/);
+      const id = result.structuredContent.document.id;
+      const saved = await storage.getDocument(HOUSEHOLD_ID, id);
+      assert.equal(saved?.title, "Unit test letter");
+      assert.doesNotMatch(JSON.stringify(saved), /expiresAt/);
+      assert.ok((await storage.listDocuments(HOUSEHOLD_ID)).some((doc) => doc.id === id));
+    } finally {
+      storage.saveDocument = save;
+      setLlmForTests(undefined);
+    }
+  });
 }
 
-storageChecks()
+seedChecks()
+  .then(storageChecks)
   .then(() => console.log(`\n${passed} checks passed.`))
   .catch((error) => {
     console.error(error);
