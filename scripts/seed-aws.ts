@@ -1,14 +1,13 @@
-// Resets the demo household in DynamoDB: deletes every document, then writes the
-// sample documents (lib/storage/seed.ts) with dates relative to today. Run it again on demo day.
+// Clears the demo household in DynamoDB: deletes every stored document (uploads and any
+// sample documents written by older versions of this script). The sample documents themselves
+// are never stored: the server rebuilds them from today's date on every request (lib/storage/merge.ts).
 // Original files already in S3 are kept (they are only referenced by deleted documents).
 // Usage: npm run seed:aws   (run npm run setup:aws once before)
 
-import { DeleteCommand, PutCommand } from "@aws-sdk/lib-dynamodb";
+import { DeleteCommand } from "@aws-sdk/lib-dynamodb";
 import { getDynamo, summarizeError, tableName } from "../lib/aws";
-import { todayISO } from "../lib/dates";
 import { HOUSEHOLD_ID } from "../lib/storage";
-import { queryHouseholdItems, toItem } from "../lib/storage/aws";
-import { buildSeedDocuments } from "../lib/storage/seed";
+import { queryHouseholdItems } from "../lib/storage/aws";
 import { loadEnv } from "./env";
 
 async function main() {
@@ -17,23 +16,16 @@ async function main() {
   const dynamo = getDynamo();
 
   const existing = await queryHouseholdItems(HOUSEHOLD_ID);
-  // One by one: the IAM user has DeleteItem/PutItem but not BatchWriteItem.
+  // One by one: the IAM user has DeleteItem but not BatchWriteItem.
   for (const item of existing) {
     await dynamo.send(new DeleteCommand({ TableName, Key: { pk: item.pk, sk: item.sk } }));
   }
-  console.log(`Deleted ${existing.length} existing document(s) from household "${HOUSEHOLD_ID}".`);
-
-  const today = todayISO();
-  const docs = buildSeedDocuments(today);
-  for (const doc of docs) {
-    await dynamo.send(new PutCommand({ TableName, Item: toItem(doc) }));
-    console.log(`  + ${doc.id}`);
-  }
-  console.log(`Wrote ${docs.length} sample documents to "${TableName}" (dates relative to ${today}).`);
+  console.log(`Deleted ${existing.length} stored document(s) from household "${HOUSEHOLD_ID}" in "${TableName}".`);
+  console.log("The sample documents are not stored: the server builds them from today's date on every request.");
 }
 
 main().catch((error) => {
-  console.error(`\nSeeding failed (${summarizeError(error)})`);
+  console.error(`\nClearing failed (${summarizeError(error)})`);
   console.error("Did you run npm run setup:aws first?");
   process.exit(1);
 });

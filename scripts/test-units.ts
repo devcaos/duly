@@ -16,6 +16,8 @@ import { getStorage, HOUSEHOLD_ID } from "../lib/storage";
 import { buildSeedDocuments } from "../lib/storage/seed";
 import { runCheckWarranty } from "../lib/tools/checkWarranty";
 import { fromItem, toItem } from "../lib/storage/aws";
+import { mergeWithSeed, pickDocument } from "../lib/storage/merge";
+import { MemoryStorage } from "../lib/storage/memory";
 import { compareIssuerBills, isNoticeablyHigher, runCompareBills, usageSentence } from "../lib/tools/compareBills";
 import { DISPUTE_RULE, findProblems, isDisputeIntent, runDraftReply, templateDraft } from "../lib/tools/draftReply";
 import { runListDeadlines } from "../lib/tools/listDeadlines";
@@ -441,6 +443,67 @@ async function checkAsync(name: string, fn: () => Promise<void>) {
 
 const hasPrev = (ids: string[]) => ids.some((id) => id.includes("-prev-"));
 
+// Virtual seed: rebuilt from the request's date on every read, never taken from storage.
+const BRIGHTWAVE = "doc-brightwave-bill";
+const brightwaveDue = (docs: Document[]) => docs.find((doc) => doc.id === BRIGHTWAVE)!.deadlines[0].date;
+function upload(id: string): Document {
+  return { ...bill(id, 40, 0), householdId: HOUSEHOLD_ID };
+}
+
+async function seedChecks() {
+  await checkAsync("seed dates follow the injected today at read time", async () => {
+    // The Brightwave bill is due today + 9.
+    assert.equal(brightwaveDue(mergeWithSeed(HOUSEHOLD_ID, [], "2026-11-15")), "2026-11-24");
+    assert.equal(brightwaveDue(mergeWithSeed(HOUSEHOLD_ID, [], "2026-11-20")), "2026-11-29");
+    assert.equal(mergeWithSeed(HOUSEHOLD_ID, [], "2026-11-15").length, buildSeedDocuments("2026-11-15").length);
+  });
+
+  await checkAsync("the seed wins over a stored copy with the same id (stale dates)", async () => {
+    const stale = { ...buildSeedDocuments("2026-10-21").find((doc) => doc.id === BRIGHTWAVE)!, title: "Stale copy" };
+    const docs = mergeWithSeed(HOUSEHOLD_ID, [stale], "2026-11-15");
+    const copies = docs.filter((doc) => doc.id === BRIGHTWAVE);
+    assert.equal(copies.length, 1);
+    assert.equal(copies[0].title, "Brightwave Energy electricity bill (SAMPLE)");
+    assert.equal(copies[0].deadlines[0].date, "2026-11-24");
+  });
+
+  await checkAsync("stored documents that are not in the seed are added (own household only)", async () => {
+    const docs = mergeWithSeed(HOUSEHOLD_ID, [upload("doc-unit-a"), bill("doc-unit-other-household", 1, 0)], "2026-11-15");
+    assert.equal(docs.length, buildSeedDocuments("2026-11-15").length + 1);
+    assert.ok(docs.some((doc) => doc.id === "doc-unit-a"));
+    assert.ok(!docs.some((doc) => doc.id === "doc-unit-other-household"));
+  });
+
+  await checkAsync("pickDocument: seed ids come from the seed, other ids from storage", async () => {
+    let loads = 0;
+    const load = (doc?: Document) => async () => {
+      loads++;
+      return doc;
+    };
+    const stale = { ...buildSeedDocuments("2026-10-21").find((doc) => doc.id === BRIGHTWAVE)!, title: "Stale copy" };
+    const seeded = await pickDocument(HOUSEHOLD_ID, BRIGHTWAVE, "2026-11-15", load(stale));
+    assert.equal(seeded?.deadlines[0].date, "2026-11-24");
+    assert.equal(seeded?.title, "Brightwave Energy electricity bill (SAMPLE)");
+    assert.equal(loads, 0); // seed reads never touch storage
+    assert.equal((await pickDocument(HOUSEHOLD_ID, "doc-unit-a", "2026-11-15", load(upload("doc-unit-a"))))?.id, "doc-unit-a");
+    assert.equal(await pickDocument(HOUSEHOLD_ID, "doc-unit-missing", "2026-11-15", load()), undefined);
+    assert.equal(loads, 2);
+  });
+
+  await checkAsync("MemoryStorage: today's seed, stored copies of seed ids ignored, uploads kept", async () => {
+    const storage = new MemoryStorage();
+    const today = todayISO();
+    const stale = { ...buildSeedDocuments(addDays(today, -30)).find((doc) => doc.id === BRIGHTWAVE)!, title: "Stale copy" };
+    await storage.saveDocument(stale);
+    await storage.saveDocument(upload("doc-unit-a"));
+    const docs = await storage.listDocuments(HOUSEHOLD_ID);
+    assert.equal(brightwaveDue(docs), addDays(today, 9));
+    assert.equal(docs.length, buildSeedDocuments(today).length + 1);
+    assert.equal((await storage.getDocument(HOUSEHOLD_ID, BRIGHTWAVE))?.title, "Brightwave Energy electricity bill (SAMPLE)");
+    assert.equal((await storage.getDocument(HOUSEHOLD_ID, "doc-unit-a"))?.id, "doc-unit-a");
+  });
+}
+
 // Tools on the in-memory seed (dates relative to today).
 async function storageChecks() {
   process.env.STORAGE = "memory";
@@ -618,7 +681,8 @@ async function storageChecks() {
   });
 }
 
-storageChecks()
+seedChecks()
+  .then(storageChecks)
   .then(() => console.log(`\n${passed} checks passed.`))
   .catch((error) => {
     console.error(error);

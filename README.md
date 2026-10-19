@@ -57,7 +57,7 @@ flowchart LR
 ```
 
 - **MCP server** ([`app/api/mcp/route.ts`](app/api/mcp/route.ts)): `mcp-handler` + the official MCP TypeScript SDK, stateless Streamable HTTP. Every tool returns a short spoken sentence plus `structuredContent` with the full data for screens. Requests are rate-limited per IP.
-- **Storage adapter** ([`lib/storage/`](lib/storage/)): `STORAGE=aws` (DynamoDB + S3) or `STORAGE=memory` (in-process, seeded with the sample documents).
+- **Storage adapter** ([`lib/storage/`](lib/storage/)): `STORAGE=aws` (DynamoDB + S3) or `STORAGE=memory` (in-process). Both adapters store only uploaded documents and add the sample documents on every read ([`lib/storage/merge.ts`](lib/storage/merge.ts)).
 - **LLM adapter** ([`lib/llm/`](lib/llm/)): `LLM_PROVIDER=bedrock` or `gemini`, with an optional `LLM_FALLBACK`.
 - **Web demo**: [`app/api/chat/route.ts`](app/api/chat/route.ts) runs a Bedrock Converse agent ([`lib/agent/agent.ts`](lib/agent/agent.ts)) that is an **MCP client of Duly's own `/api/mcp`** ([`lib/agent/mcpClient.ts`](lib/agent/mcpClient.ts)): it lists the tools over MCP, lets the model pick one and calls it over MCP, the same way Alexa+ would.
 
@@ -78,7 +78,7 @@ When a company has several bills, search, explanations and drafts always use the
 
 ### Sample data
 
-14 fictional documents (marked SAMPLE): an electricity bill, a car insurance renewal, a dishwasher receipt with warranty, a parking notice, a gym auto-renewal and a school field-trip form, plus four more warranties (a TV, a fridge that is about to run out, an expired washing machine and a laptop) and two earlier electricity and water bills each, so bills can be compared (the electricity bills also store their kWh usage). All dates are relative to today, so deadlines are always upcoming; the earlier bills are already paid and never show up as deadlines.
+14 fictional documents (marked SAMPLE): an electricity bill, a car insurance renewal, a dishwasher receipt with warranty, a parking notice, a gym auto-renewal and a school field-trip form, plus four more warranties (a TV, a fridge that is about to run out, an expired washing machine and a laptop) and two earlier electricity and water bills each, so bills can be compared (the electricity bills also store their kWh usage). All dates are relative to today: the sample documents are never stored, the server rebuilds them from the date of each request (UTC) with both `STORAGE=memory` and `STORAGE=aws`, so their deadlines are always upcoming however long the deployment runs. A stored document with the same id as a sample document is ignored. The earlier bills are already paid and never show up as deadlines.
 
 ### More
 
@@ -100,7 +100,7 @@ Duly runs on AWS when `STORAGE=aws` and `LLM_PROVIDER=bedrock` (region `eu-west-
 Setup scripts (AWS SDK for JavaScript v3):
 
 - [`scripts/setup-aws.ts`](scripts/setup-aws.ts): `npm run setup:aws` creates the DynamoDB table and the private S3 bucket. Safe to run again.
-- [`scripts/seed-aws.ts`](scripts/seed-aws.ts): `npm run seed:aws` resets the demo household to the sample documents ([`lib/storage/seed.ts`](lib/storage/seed.ts)), with dates relative to today.
+- [`scripts/seed-aws.ts`](scripts/seed-aws.ts): `npm run seed:aws` clears the demo household: it deletes every stored document (uploads, and sample copies written by older versions of the script). It writes nothing: the sample documents ([`lib/storage/seed.ts`](lib/storage/seed.ts)) are added by the server on every read.
 
 If Bedrock is throttled, temporarily unavailable or times out, `LLM_FALLBACK=gemini` retries the same request with Google Gemini, and the server log says which provider answered (`[llm] answered by bedrock`). The fallback is **not** used for `AccessDenied`, validation or other client errors: those mean the AWS setup is wrong, so Duly logs `AWS is misconfigured` and returns a generic error. Logs only contain the error name, HTTP status and a short message (ARNs, account IDs and request IDs are masked), and tool callers never see configuration details.
 
@@ -148,7 +148,7 @@ What works with which settings:
 |---|---|
 | Nothing (defaults: `STORAGE=memory`, `LLM_PROVIDER=gemini`) | `npm run test:unit`; the MCP server with the sample documents; the tools that don't use an LLM (`list_deadlines`, `check_warranty`, `search_documents`, `compare_bills`, `weekly_brief`); the web demo's "Coming up" list. |
 | + `GEMINI_API_KEY` | Also `add_document`, `explain_document` and `draft_reply`. |
-| + `AWS_REGION`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` (IAM user with the [policy above](#iam-permissions-least-privilege)) | Bedrock (`LLM_PROVIDER=bedrock`), DynamoDB + S3 (`STORAGE=aws`, after `setup:aws` and `seed:aws`), Polly, and the web demo's questions (the `/api/chat` agent always uses Bedrock). |
+| + `AWS_REGION`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` (IAM user with the [policy above](#iam-permissions-least-privilege)) | Bedrock (`LLM_PROVIDER=bedrock`), DynamoDB + S3 (`STORAGE=aws`, after `setup:aws`), Polly, and the web demo's questions (the `/api/chat` agent always uses Bedrock). |
 | `npm run mock:aws` (no AWS account) | The web demo with canned answers, see [Test the web demo without AWS](#test-the-web-demo-without-aws). |
 
 With `STORAGE=memory`, documents you add can disappear when the server restarts; the sample documents always come back.
@@ -159,7 +159,7 @@ Only with AWS credentials in `.env.local`:
 
 ```bash
 npm run setup:aws    # creates the DynamoDB table and the private S3 bucket
-npm run seed:aws     # resets the demo household to the sample documents
+npm run seed:aws     # clears uploaded documents (the sample documents are never stored)
 ```
 
 Then set `STORAGE=aws`, `LLM_PROVIDER=bedrock` (and optionally `LLM_FALLBACK=gemini`) in `.env.local`.

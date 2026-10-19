@@ -2,8 +2,10 @@ import { PutObjectCommand } from "@aws-sdk/client-s3";
 import { GetCommand, PutCommand, QueryCommand } from "@aws-sdk/lib-dynamodb";
 import type { NativeAttributeValue } from "@aws-sdk/lib-dynamodb";
 import { bucketName, getDynamo, getS3, tableName } from "@/lib/aws";
+import { todayISO } from "@/lib/dates";
 import type { FileMimeType } from "@/lib/llm";
 import type { Document } from "@/lib/types";
+import { mergeWithSeed, pickDocument } from "./merge";
 import { fileKeyFor } from "./types";
 import type { StorageAdapter } from "./types";
 
@@ -42,17 +44,21 @@ export async function queryHouseholdItems(householdId: string): Promise<Item[]> 
   return items;
 }
 
-// Documents in DynamoDB, original files in a private S3 bucket.
+// Uploaded documents in DynamoDB, original files in a private S3 bucket.
+// The sample documents are not stored: every read rebuilds them (see ./merge.ts).
 export class AwsStorage implements StorageAdapter {
   async listDocuments(householdId: string): Promise<Document[]> {
-    return (await queryHouseholdItems(householdId)).map(fromItem);
+    const stored = (await queryHouseholdItems(householdId)).map(fromItem);
+    return mergeWithSeed(householdId, stored, todayISO());
   }
 
   async getDocument(householdId: string, id: string): Promise<Document | undefined> {
-    const { Item } = await getDynamo().send(
-      new GetCommand({ TableName: tableName(), Key: { pk: householdPk(householdId), sk: docSk(id) } }),
-    );
-    return Item ? fromItem(Item) : undefined;
+    return pickDocument(householdId, id, todayISO(), async () => {
+      const { Item } = await getDynamo().send(
+        new GetCommand({ TableName: tableName(), Key: { pk: householdPk(householdId), sk: docSk(id) } }),
+      );
+      return Item ? fromItem(Item) : undefined;
+    });
   }
 
   async saveDocument(doc: Document): Promise<void> {
