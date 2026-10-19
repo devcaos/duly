@@ -45,6 +45,11 @@ export function getDynamo(): DynamoDBDocumentClient {
   return dynamo;
 }
 
+// Unit tests only: use a fake DynamoDB client (undefined goes back to the real one).
+export function setDynamoForTests(client: DynamoDBDocumentClient | undefined): void {
+  dynamo = client;
+}
+
 export function getS3(): S3Client {
   s3 ??= new S3Client({ region: awsRegion() });
   return s3;

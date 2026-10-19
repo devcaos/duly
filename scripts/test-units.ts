@@ -15,7 +15,10 @@ import type { LlmAdapter } from "../lib/llm";
 import { getStorage, HOUSEHOLD_ID } from "../lib/storage";
 import { buildSeedDocuments } from "../lib/storage/seed";
 import { runCheckWarranty } from "../lib/tools/checkWarranty";
-import { fromItem, fromStoredItem, toItem } from "../lib/storage/aws";
+import { GetCommand, QueryCommand } from "@aws-sdk/lib-dynamodb";
+import type { DynamoDBDocumentClient } from "@aws-sdk/lib-dynamodb";
+import { setDynamoForTests } from "../lib/aws";
+import { AwsStorage, fromItem, fromStoredItem, toItem } from "../lib/storage/aws";
 import { liveDocuments, mergeWithSeed, pickDocument, UPLOAD_TTL_SECONDS, uploadExpiresAt } from "../lib/storage/merge";
 import { MemoryStorage } from "../lib/storage/memory";
 import { compareIssuerBills, isNoticeablyHigher, runCompareBills, usageSentence } from "../lib/tools/compareBills";
@@ -543,6 +546,58 @@ async function seedChecks() {
     assert.deepEqual(fromItem(toItem(doc, 1_800_000_000)), doc);
     assert.deepEqual(fromStoredItem(toItem(doc, 1_800_000_000)), { doc, expiresAt: 1_800_000_000 });
     assert.deepEqual(fromStoredItem(toItem(doc)), { doc, expiresAt: undefined });
+  });
+
+  await checkAsync("AwsStorage: today's seed, expired uploads hidden, valid and legacy uploads kept", async () => {
+    const today = todayISO();
+    const nowSeconds = Math.floor(Date.now() / 1000);
+    const stale = { ...buildSeedDocuments(addDays(today, -30)).find((doc) => doc.id === BRIGHTWAVE)!, title: "Stale copy" };
+    // What an older seed script and add_document left in the table.
+    const items = [
+      toItem(upload("doc-unit-aws-expired"), nowSeconds - 60),
+      toItem(stale),
+      toItem(upload("doc-unit-aws-fresh"), uploadExpiresAt(Date.now())),
+      toItem(upload("doc-unit-aws-legacy")),
+    ];
+    let gets = 0;
+    const fakeDynamo = {
+      async send(command: QueryCommand | GetCommand) {
+        if (command instanceof QueryCommand) {
+          const pk = command.input.ExpressionAttributeValues?.[":pk"];
+          return { Items: items.filter((item) => item.pk === pk) };
+        }
+        gets++;
+        const { pk, sk } = command.input.Key!;
+        return { Item: items.find((item) => item.pk === pk && item.sk === sk) };
+      },
+    };
+    setDynamoForTests(fakeDynamo as unknown as DynamoDBDocumentClient);
+    try {
+      const storage = new AwsStorage();
+      const docs = await storage.listDocuments(HOUSEHOLD_ID);
+      const ids = docs.map((doc) => doc.id);
+      assert.equal(docs.length, buildSeedDocuments(today).length + 2);
+      assert.equal(docs.filter((doc) => doc.id === BRIGHTWAVE).length, 1);
+      assert.equal(brightwaveDue(docs), addDays(today, 9));
+      assert.ok(!docs.some((doc) => doc.title === "Stale copy"));
+      assert.ok(ids.includes("doc-unit-aws-fresh"));
+      assert.ok(ids.includes("doc-unit-aws-legacy"));
+      assert.ok(!ids.includes("doc-unit-aws-expired"));
+      assert.doesNotMatch(JSON.stringify(docs), /expiresAt/);
+
+      const seeded = await storage.getDocument(HOUSEHOLD_ID, BRIGHTWAVE);
+      assert.equal(seeded?.title, "Brightwave Energy electricity bill (SAMPLE)");
+      assert.equal(seeded?.deadlines[0].date, addDays(today, 9));
+      assert.equal(gets, 0); // seed ids never read the table
+      assert.equal(await storage.getDocument(HOUSEHOLD_ID, "doc-unit-aws-expired"), undefined);
+      const fresh = await storage.getDocument(HOUSEHOLD_ID, "doc-unit-aws-fresh");
+      assert.equal(fresh?.id, "doc-unit-aws-fresh");
+      assert.equal((await storage.getDocument(HOUSEHOLD_ID, "doc-unit-aws-legacy"))?.id, "doc-unit-aws-legacy");
+      assert.equal(await storage.getDocument(HOUSEHOLD_ID, "doc-unit-aws-missing"), undefined);
+      assert.doesNotMatch(JSON.stringify([seeded, fresh]), /expiresAt/);
+    } finally {
+      setDynamoForTests(undefined);
+    }
   });
 }
 
