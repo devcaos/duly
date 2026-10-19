@@ -1,12 +1,15 @@
 // Generates the fictional sample documents in /samples (SPEC.md section 8).
 // Usage:
 //   npm run samples
+//   SAMPLES_TODAY=2026-11-12 npm run samples                    (macOS / Linux: dates relative to that day)
+//   $env:SAMPLES_TODAY="2026-11-12"; npm run samples            (Windows PowerShell)
 // Needs Node 22+ and a Chromium-based browser (Chrome, Chromium, Brave or Edge); no extra npm packages.
 // If it is not found automatically, set CHROME_PATH to the browser executable.
 //
 // The facts (issuers, amounts, numbers, day offsets) are the same as in
-// lib/storage/seed.ts. Dates are relative to the day the script runs, like the
-// seed, so run it again on demo day to keep every deadline upcoming.
+// lib/storage/seed.ts. Dates are relative to SAMPLES_TODAY (YYYY-MM-DD), or to the day
+// the script runs when it is not set. The seed always uses the request's date, so the
+// paper dates only match the app on that day: pick the demo day.
 // If you change seed.ts, change the matching document here too.
 
 import { spawn } from "node:child_process";
@@ -24,7 +27,7 @@ const MAX_PNG_BYTES = 1024 * 1024;
 
 // ---------- Dates and money (same rules as lib/dates.ts) ----------
 
-const today = new Date().toISOString().slice(0, 10);
+const today = process.env.SAMPLES_TODAY ?? new Date().toISOString().slice(0, 10);
 
 function d(days) {
   const date = new Date(`${today}T00:00:00Z`);

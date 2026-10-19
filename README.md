@@ -84,7 +84,7 @@ When a company has several bills, search, explanations and drafts always use the
 
 - [`skills/duly/SKILL.md`](skills/duly/SKILL.md): Agent Skill that tells any agent when and how to use the Duly tools.
 - [`FRICTION.md`](FRICTION.md): friction log of the problems we hit with AWS and MCP tools.
-- [`samples/README.md`](samples/README.md): the sample documents (PNG/PDF) and the expected extraction for each one.
+- [`samples/README.md`](samples/README.md): the sample documents (PNG/PDF) and the expected extraction for each one. `npm run samples` regenerates them with dates relative to today; set `SAMPLES_TODAY=YYYY-MM-DD` to use a fixed base date instead (e.g. the demo day, so the dates on paper match the seed that day).
 
 ## Built with AWS
 
