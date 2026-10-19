@@ -2,6 +2,9 @@
 // sample documents written by older versions of this script). The sample documents themselves
 // are never stored: the server rebuilds them from today's date on every request (lib/storage/merge.ts).
 // Original files already in S3 are kept (they are only referenced by deleted documents).
+// Deploy first, then run npm run seed:aws (it only clears stored uploads; the samples are built
+// on every read). An older deployment reads only from DynamoDB, so running this before deploying
+// leaves the demo household empty.
 // Usage: npm run seed:aws   (run npm run setup:aws once before)
 
 import { DeleteCommand } from "@aws-sdk/lib-dynamodb";

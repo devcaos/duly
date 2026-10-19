@@ -93,14 +93,14 @@ Duly runs on AWS when `STORAGE=aws` and `LLM_PROVIDER=bedrock` (region `eu-west-
 | AWS service | What it does in Duly | Files |
 |---|---|---|
 | **Amazon Bedrock** (Converse API, **Amazon Nova 2 Lite** via the EU cross-region inference profile `eu.amazon.nova-2-lite-v1:0`) | Reads photos (PNG/JPEG) and PDFs of household paperwork and extracts type, issuer, amounts, deadlines and action items as validated JSON (`add_document`). Writes plain-language explanations (`explain_document`) and reply drafts (`draft_reply`). Uses a forced tool call so the answer always matches the zod schema. In the web demo, it is also the agent that picks which Duly MCP tool to call (Converse tool use). | [`lib/llm/bedrock.ts`](lib/llm/bedrock.ts), [`lib/llm/index.ts`](lib/llm/index.ts), [`lib/llm/fallback.ts`](lib/llm/fallback.ts), [`lib/agent/agent.ts`](lib/agent/agent.ts) |
-| **Amazon DynamoDB** (on-demand table `duly`, keys `pk = HOUSEHOLD#<id>`, `sk = DOC#<id>`) | Stores every document and its deadlines. All tools read from it. | [`lib/storage/aws.ts`](lib/storage/aws.ts), [`lib/aws.ts`](lib/aws.ts) |
+| **Amazon DynamoDB** (on-demand table `duly`, keys `pk = HOUSEHOLD#<id>`, `sk = DOC#<id>`) | Stores uploaded documents (the samples are built on every read). All tools read from it. | [`lib/storage/aws.ts`](lib/storage/aws.ts), [`lib/aws.ts`](lib/aws.ts) |
 | **Amazon S3** (private bucket `duly-devcaos-files`, all public access blocked) | Keeps the original uploaded file of each document (`households/<id>/<doc-id>.pdf`); its key is saved in `Document.fileKey`. | [`lib/storage/aws.ts`](lib/storage/aws.ts), [`lib/tools/addDocument.ts`](lib/tools/addDocument.ts) |
 | **Amazon Polly** (neural voice, `Joanna` en-US by default, `POLLY_VOICE_ID` to change it) | Speaks the web demo's replies (MP3). If Polly fails, the page falls back to the browser's `speechSynthesis`. | [`app/api/speak/route.ts`](app/api/speak/route.ts), [`components/echo/voice.ts`](components/echo/voice.ts) |
 
 Setup scripts (AWS SDK for JavaScript v3):
 
 - [`scripts/setup-aws.ts`](scripts/setup-aws.ts): `npm run setup:aws` creates the DynamoDB table and the private S3 bucket. Safe to run again.
-- [`scripts/seed-aws.ts`](scripts/seed-aws.ts): `npm run seed:aws` clears the demo household: it deletes every stored document (uploads, and sample copies written by older versions of the script). It writes nothing: the sample documents ([`lib/storage/seed.ts`](lib/storage/seed.ts)) are added by the server on every read.
+- [`scripts/seed-aws.ts`](scripts/seed-aws.ts): `npm run seed:aws` clears the demo household: it deletes every stored document (uploads, and sample copies written by older versions of the script). It writes nothing: the sample documents ([`lib/storage/seed.ts`](lib/storage/seed.ts)) are added by the server on every read. Deploy first, then run `npm run seed:aws` (it only clears stored uploads; the samples are built on every read): an older deployment reads only from DynamoDB, so clearing the table before deploying leaves the demo with no documents.
 
 If Bedrock is throttled, temporarily unavailable or times out, `LLM_FALLBACK=gemini` retries the same request with Google Gemini, and the server log says which provider answered (`[llm] answered by bedrock`). The fallback is **not** used for `AccessDenied`, validation or other client errors: those mean the AWS setup is wrong, so Duly logs `AWS is misconfigured` and returns a generic error. Logs only contain the error name, HTTP status and a short message (ARNs, account IDs and request IDs are masked), and tool callers never see configuration details.
 
@@ -161,6 +161,10 @@ Only with AWS credentials in `.env.local`:
 npm run setup:aws    # creates the DynamoDB table and the private S3 bucket
 npm run seed:aws     # clears uploaded documents (the sample documents are never stored)
 ```
+
+Deploy first, then run `npm run seed:aws` (it only clears stored uploads; the samples are built on every read).
+
+One manual step: in the AWS console, enable DynamoDB TTL on the attribute `expiresAt` (table `duly`, region `eu-west-1`, **Additional settings** > **Time to Live (TTL)**). Without it, expired uploads stay in the table but are always hidden.
 
 Then set `STORAGE=aws`, `LLM_PROVIDER=bedrock` (and optionally `LLM_FALLBACK=gemini`) in `.env.local`.
 
@@ -244,7 +248,7 @@ Host check: `/api/mcp` answers only when the `Host` header is `localhost`, `127.
 
 - Explanations are grounded by prompt rules (the model is told to use only the document's own facts), not by a full fact validator.
 - No sign-in: one demo household with fictional data only. Don't upload real documents to the public deployment.
-- Uploaded documents expire after 24 hours, because everyone shares the demo household: `add_document` stores an internal `expiresAt` (epoch seconds, never returned by any tool) and reads hide the document once it has passed. With [DynamoDB TTL](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/TTL.html) enabled on `expiresAt`, AWS also deletes the item, usually within a few days. The original file stays in S3 unless the bucket has a lifecycle rule.
+- Uploaded documents expire after 24 hours, because everyone shares the demo household: `add_document` stores an internal `expiresAt` (epoch seconds, never returned by any tool) and reads hide the document once it has passed. To also delete the items, enable [DynamoDB TTL](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/TTL.html) on the attribute `expiresAt` by hand in the AWS console (table `duly`, `eu-west-1`); AWS then removes expired items, usually within a few days. Without it, expired items stay in the table but are always hidden. The original file stays in S3 unless the bucket has a lifecycle rule.
 - Rate limits are in memory, per server instance.
 
 ## Related
