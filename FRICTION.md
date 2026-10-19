@@ -122,7 +122,7 @@ One entry per problem with an Amazon/AWS/MCP tool, SDK or doc. Write it when it 
 - **Workaround:** Don't cap images in the library; turn empty images (0 bytes) into text markers, because the minimum is documented.
 - **Suggestion:** Put the image limits on the API reference pages, or link to them from there.
 
-- ### Alexa+ MCP Toolkit: the quickstart reads as self-service, but access is partner-only
+### Alexa+ MCP Toolkit: the quickstart reads as self-service, but access is partner-only
 - **Tool / API / SDK:** Alexa+ MCP Toolkit (`@alexa-ai/cli`), Alexa+ add-ons developer console and web simulator
 - **Task I attempted:** Register the deployed Duly MCP server (`https://duly-home.vercel.app/api/mcp`, Streamable HTTP, spec 2025-11-25) as an Alexa+ add-on and test it in the official web simulator, so the demo could show real Alexa+ instead of my own simulated Echo Show.
 - **Steps I took:** Followed the MCP toolkit quickstart, "Set Up Your Development Environment" and "Test in the Web Simulator". On Oct 19, 2026 I created an Amazon developer account and opened the add-ons console and the simulator. Checked `@alexa-ai/cli` on the public npm registry. Then searched the hackathon forum.
