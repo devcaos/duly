@@ -5,9 +5,10 @@ import { bucketName, getDynamo, getS3, tableName } from "@/lib/aws";
 import { todayISO } from "@/lib/dates";
 import type { FileMimeType } from "@/lib/llm";
 import type { Document } from "@/lib/types";
-import { mergeWithSeed, pickDocument } from "./merge";
+import { liveDocuments, mergeWithSeed, pickDocument } from "./merge";
+import type { StoredDocument } from "./merge";
 import { fileKeyFor } from "./types";
-import type { StorageAdapter } from "./types";
+import type { SaveOptions, StorageAdapter } from "./types";
 
 type Item = Record<string, NativeAttributeValue>;
 
@@ -15,14 +16,21 @@ type Item = Record<string, NativeAttributeValue>;
 export const householdPk = (householdId: string) => `HOUSEHOLD#${householdId}`;
 export const docSk = (docId: string) => `DOC#${docId}`;
 
-export function toItem(doc: Document): Item {
-  return { pk: householdPk(doc.householdId), sk: docSk(doc.id), ...doc };
+// expiresAt (epoch seconds) is the attribute DynamoDB TTL reads; documents without it never expire.
+export function toItem(doc: Document, expiresAt?: number): Item {
+  const item: Item = { pk: householdPk(doc.householdId), sk: docSk(doc.id), ...doc };
+  if (expiresAt !== undefined) item.expiresAt = expiresAt;
+  return item;
 }
 
 export function fromItem(item: Item): Document {
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const { pk, sk, ...doc } = item;
+  const { pk, sk, expiresAt, ...doc } = item;
   return doc as Document;
+}
+
+export function fromStoredItem(item: Item): StoredDocument {
+  return { doc: fromItem(item), expiresAt: typeof item.expiresAt === "number" ? item.expiresAt : undefined };
 }
 
 // All document items of a household, following DynamoDB pagination.
@@ -48,8 +56,8 @@ export async function queryHouseholdItems(householdId: string): Promise<Item[]> 
 // The sample documents are not stored: every read rebuilds them (see ./merge.ts).
 export class AwsStorage implements StorageAdapter {
   async listDocuments(householdId: string): Promise<Document[]> {
-    const stored = (await queryHouseholdItems(householdId)).map(fromItem);
-    return mergeWithSeed(householdId, stored, todayISO());
+    const stored = (await queryHouseholdItems(householdId)).map(fromStoredItem);
+    return mergeWithSeed(householdId, liveDocuments(stored, Date.now()), todayISO());
   }
 
   async getDocument(householdId: string, id: string): Promise<Document | undefined> {
@@ -57,12 +65,12 @@ export class AwsStorage implements StorageAdapter {
       const { Item } = await getDynamo().send(
         new GetCommand({ TableName: tableName(), Key: { pk: householdPk(householdId), sk: docSk(id) } }),
       );
-      return Item ? fromItem(Item) : undefined;
+      return Item ? liveDocuments([fromStoredItem(Item)], Date.now())[0] : undefined;
     });
   }
 
-  async saveDocument(doc: Document): Promise<void> {
-    await getDynamo().send(new PutCommand({ TableName: tableName(), Item: toItem(doc) }));
+  async saveDocument(doc: Document, options?: SaveOptions): Promise<void> {
+    await getDynamo().send(new PutCommand({ TableName: tableName(), Item: toItem(doc, options?.expiresAt) }));
   }
 
   async saveFile(householdId: string, docId: string, bytes: Buffer, mimeType: FileMimeType): Promise<string> {

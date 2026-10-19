@@ -244,6 +244,7 @@ Host check: `/api/mcp` answers only when the `Host` header is `localhost`, `127.
 
 - Explanations are grounded by prompt rules (the model is told to use only the document's own facts), not by a full fact validator.
 - No sign-in: one demo household with fictional data only. Don't upload real documents to the public deployment.
+- Uploaded documents expire after 24 hours, because everyone shares the demo household: `add_document` stores an internal `expiresAt` (epoch seconds, never returned by any tool) and reads hide the document once it has passed. With [DynamoDB TTL](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/TTL.html) enabled on `expiresAt`, AWS also deletes the item, usually within a few days. The original file stays in S3 unless the bucket has a lifecycle rule.
 - Rate limits are in memory, per server instance.
 
 ## Related

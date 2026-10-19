@@ -2,6 +2,7 @@ import { z } from "zod";
 import { getLlm } from "@/lib/llm";
 import type { FileMimeType } from "@/lib/llm";
 import { getStorage, HOUSEHOLD_ID } from "@/lib/storage";
+import { uploadExpiresAt } from "@/lib/storage/merge";
 import { formatMoney, formatSpokenDate, todayISO } from "@/lib/dates";
 import { decodeFile } from "@/lib/files";
 import { documentSchema, isoDateSchema as isoDate } from "@/lib/schemas";
@@ -89,7 +90,8 @@ export async function runAddDocument(input: {
     fileKey,
     createdAt: new Date().toISOString(),
   };
-  await storage.saveDocument(document);
+  // Hidden after 24 hours: the public demo household is shared by everyone.
+  await storage.saveDocument(document, { expiresAt: uploadExpiresAt(Date.now()) });
 
   return { text: `${savedSentence(document)} Duly noted.`, structuredContent: { document } };
 }
