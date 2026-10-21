@@ -7,8 +7,8 @@
 // Routes: model = Nova picked the tool; forced-keyword / forced-any = Nova answered in text and
 // was asked again requiring a tool; server-default = the server called the tool itself.
 // Exit code 1 if any question gets the wrong tool, the wrong document or a wrong reply, or if a
-// dispute letter fails its letter check (counted separately from the routing; skipped when the
-// routing already failed). "letter: OK (template)" means the server's fallback letter, not Nova's.
+// dispute letter fails its letter check (plain text, no HTML tags; counted separately from the
+// routing; skipped when the routing already failed). "letter: OK (template)" means the server's fallback letter, not Nova's.
 // Questions about a bill must use the latest bill, never an earlier one ("-prev-" ids).
 // Never reads or prints environment values.
 
@@ -98,12 +98,18 @@ const BRIGHTWAVE_AMOUNT = 84.2;
 // Same rules as lib/tools/draftReply.ts: cautious phrases ("correct any errors") give no reason.
 const ERROR_WORDS = /\b(error|errors|incorrect|mistakes?|overcharg\w*|wrong)\b/i;
 const CAUTIOUS = /\b(any|possible)\s+(errors?|mistakes?)(\s+or\s+(errors?|mistakes?))?\b|\bif\b[^.]*\b(wrong|incorrect)\b/gi;
+// "<br>", "</p>", "<b class=...>": letters must be plain text ("<5 days" is fine).
+const HTML_TAG = /<\/?[a-z][a-z0-9]*(\s[^<>]*)?\/?>/i;
 // The server's template letter (firm or polite), as built by templateDraft().
 const TEMPLATE_LETTER =
   /^Dear [^\n]+\n\n(I dispute|I would like to dispute) the (\S+ charge|charges) on your [^\n]+\.\n\n(Please|Could you please) review this bill, correct it if needed, and send me an itemized breakdown/;
 
+function draftCard(result) {
+  return result.cards.find((card) => card.kind === "draft")?.data;
+}
+
 function draftBody(result) {
-  return result.cards.find((card) => card.kind === "draft")?.data.body;
+  return draftCard(result)?.body;
 }
 
 // What's wrong with a dispute letter (empty when it's fine).
@@ -116,6 +122,8 @@ function letterProblems(result) {
   if (!numbers.some((n) => Number(n) === BRIGHTWAVE_AMOUNT)) problems.push(`no amount ${BRIGHTWAVE_AMOUNT}`);
   const reason = body.replace(CAUTIOUS, "").match(ERROR_WORDS);
   if (reason) problems.push(`gives a reason ("${reason[0]}")`);
+  const tag = `${draftCard(result).subject}\n${body}`.match(HTML_TAG);
+  if (tag) problems.push(`contains HTML tags ("${tag[0]}")`);
   return problems;
 }
 

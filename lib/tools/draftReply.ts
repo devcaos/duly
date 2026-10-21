@@ -35,7 +35,7 @@ Rules:
 - Write dates like "October 5, 2026", never as YYYY-MM-DD.
 - body: only the paragraphs. No greeting ("Dear ...") and no sign-off ("Sincerely", your name): they are added automatically.
 - Never invent personal data: use placeholders like [Your address] or [Your phone] if needed.
-- Under 120 words. Plain text, no markdown, English. A blank line between paragraphs.`;
+- Under 120 words, in English. Plain text only: no markdown and no HTML tags (never <br>). Separate paragraphs with a blank line (\\n\\n).`;
 
 // What each tone means. Firm must read clearly different from polite, without threats.
 const TONE_RULES: Record<Tone, (replyBy: string) => string> = {
@@ -253,11 +253,27 @@ const GREETING = /^\s*(dear|hello|hi|to whom)\b[^\n]*\n+/i;
 const SIGN_OFF_LINE =
   /\n\s*(sincerely|regards|kind regards|best regards|best|yours (?:truly|sincerely|faithfully)|thank you|thanks|respectfully)\s*[,.!]?\s*(\n[\s\S]*)?$/i;
 
-// Dates in words, no greeting or sign-off from the model, and words glued after punctuation
-// ("Team,I", "date.We") separated.
+const LINE_BREAK_TAG = /<br\s*\/?>/gi;
+// Only real HTML tag names, so "<5 days" or "a < b" are never touched.
+const BLOCK_TAG = /<\/?(?:p|div|li|ul|ol|h[1-6]|blockquote)(?:\s[^<>]*)?>/gi;
+const INLINE_TAG = /<\/?(?:b|strong|i|em|u|span|a|font|small|sup|sub|code)(?:\s[^<>]*)?>/gi;
+
+// The model sometimes writes HTML ("breakdown.<br><br>Thank you"): line breaks and blocks
+// become real line breaks, other tags are removed, and at most one blank line is kept.
+export function toPlainText(text: string): string {
+  return text
+    .replace(LINE_BREAK_TAG, "\n")
+    .replace(BLOCK_TAG, "\n")
+    .replace(INLINE_TAG, "")
+    .replace(/[ \t]+$/gm, "")
+    .replace(/\n{3,}/g, "\n\n");
+}
+
+// Plain text, dates in words, no greeting or sign-off from the model, and words glued after
+// punctuation ("Team,I", "date.We") separated.
 function normalize(draft: Draft): Draft {
   const tidy = (text: string) =>
-    text
+    toPlainText(text)
       .replace(ISO_DATE, (iso) => formatLongDate(iso))
       .replace(/([,;])(?=[A-Za-z])/g, "$1 ")
       .replace(/([a-z])\.(?=[A-Z])/g, "$1. ")
