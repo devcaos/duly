@@ -30,11 +30,14 @@ export interface ListenHandlers {
   onEnd: () => void;
 }
 
+export const BRAVE_MESSAGE = "Voice input doesn't work in Brave. Use Chrome or Edge, or type your question.";
+
 // Starts listening once (en-US). Returns a function that stops listening.
 export function startListening(handlers: ListenHandlers): () => void {
   const speechWindow = window as unknown as {
     SpeechRecognition?: RecognitionConstructor;
     webkitSpeechRecognition?: RecognitionConstructor;
+    navigator: { brave?: { isBrave(): Promise<boolean> } };
   };
   const Ctor = speechWindow.SpeechRecognition ?? speechWindow.webkitSpeechRecognition;
   if (!Ctor) {
@@ -43,6 +46,35 @@ export function startListening(handlers: ListenHandlers): () => void {
     return () => {};
   }
 
+  // Brave has webkitSpeechRecognition but blocks Google's speech service, so recognition
+  // ends at once with no result. Only Brave has navigator.brave: every other browser
+  // starts right away, exactly as before.
+  const brave = speechWindow.navigator.brave;
+  if (brave) {
+    let cancelled = false;
+    let stop: () => void = () => {
+      cancelled = true;
+      handlers.onEnd();
+    };
+    brave
+      .isBrave()
+      .catch(() => false)
+      .then((isBrave) => {
+        if (cancelled) return;
+        if (isBrave) {
+          stop = () => {};
+          handlers.onError(BRAVE_MESSAGE);
+          handlers.onEnd();
+        } else {
+          stop = listen(Ctor, handlers);
+        }
+      });
+    return () => stop();
+  }
+  return listen(Ctor, handlers);
+}
+
+function listen(Ctor: RecognitionConstructor, handlers: ListenHandlers): () => void {
   const recognition = new Ctor();
   recognition.lang = "en-US";
   recognition.interimResults = true;
