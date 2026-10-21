@@ -28,6 +28,7 @@ import { runListDeadlines } from "../lib/tools/listDeadlines";
 import { resolveDocument } from "../lib/tools/resolveDocument";
 import { runWeeklyBrief } from "../lib/tools/weeklyBrief";
 import type { Document } from "../lib/types";
+import { BRAVE_MESSAGE, startListening } from "../components/echo/voice";
 
 let passed = 0;
 function check(name: string, fn: () => void) {
@@ -601,6 +602,76 @@ async function seedChecks() {
   });
 }
 
+// Voice input: Brave gets a clear message instead of recognition that ends silently.
+// A fake browser window with a fake webkitSpeechRecognition that counts starts.
+async function withFakeBrowser(brave: (() => Promise<boolean>) | undefined, fn: (counts: { created: number; started: number }) => Promise<void>) {
+  const counts = { created: 0, started: 0 };
+  class FakeRecognition {
+    onresult = null;
+    onerror = null;
+    onend = null;
+    constructor() {
+      counts.created++;
+    }
+    start() {
+      counts.started++;
+    }
+    stop() {}
+    abort() {}
+  }
+  const navigator = brave ? { brave: { isBrave: brave } } : {};
+  const global = globalThis as { window?: unknown };
+  global.window = { webkitSpeechRecognition: FakeRecognition, navigator };
+  try {
+    await fn(counts);
+  } finally {
+    delete global.window;
+  }
+}
+
+function listenHandlers() {
+  const calls = { errors: [] as string[], ends: 0 };
+  const handlers = {
+    onInterim: () => {},
+    onFinal: () => {},
+    onError: (message: string) => calls.errors.push(message),
+    onEnd: () => calls.ends++,
+  };
+  return { calls, handlers };
+}
+
+async function voiceChecks() {
+  await checkAsync("voice: Brave shows a message and never starts recognition", async () => {
+    await withFakeBrowser(async () => true, async (counts) => {
+      const { calls, handlers } = listenHandlers();
+      startListening(handlers);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      assert.deepEqual(calls.errors, [BRAVE_MESSAGE]);
+      assert.equal(calls.ends, 1);
+      assert.equal(counts.created, 0);
+    });
+  });
+
+  await checkAsync("voice: other browsers start recognition right away, as before", async () => {
+    await withFakeBrowser(undefined, async (counts) => {
+      const { calls, handlers } = listenHandlers();
+      startListening(handlers);
+      assert.equal(counts.started, 1); // synchronously, no await before start()
+      assert.deepEqual(calls.errors, []);
+    });
+  });
+
+  await checkAsync("voice: navigator.brave that says it isn't Brave still starts", async () => {
+    await withFakeBrowser(async () => false, async (counts) => {
+      const { calls, handlers } = listenHandlers();
+      startListening(handlers);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      assert.equal(counts.started, 1);
+      assert.deepEqual(calls.errors, []);
+    });
+  });
+}
+
 // Tools on the in-memory seed (dates relative to today).
 async function storageChecks() {
   process.env.STORAGE = "memory";
@@ -818,6 +889,7 @@ async function storageChecks() {
 }
 
 seedChecks()
+  .then(voiceChecks)
   .then(storageChecks)
   .then(() => console.log(`\n${passed} checks passed.`))
   .catch((error) => {

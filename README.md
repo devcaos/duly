@@ -227,7 +227,7 @@ Remove the `AWS_ENDPOINT_URL_*` lines to use real AWS.
 
 ## How the web demo works
 
-- Press the **mic** and ask a question (Web Speech API, `en-US`, Chrome or Edge), or **type** it. The suggestion chips run the demo questions.
+- Press the **mic** and ask a question (Web Speech API, `en-US`, Chrome or Edge), or **type** it. Brave blocks the speech service, so in Brave the mic shows "Voice input doesn't work in Brave" instead of listening. The suggestion chips run the demo questions.
 - **Add document** uploads a photo or PDF (JPEG, PNG or PDF, max 3 MB) and saves it with `add_document`.
 - The reply is spoken with **Amazon Polly** (neural voice). If Polly is unavailable, the browser's own voice reads it.
 - The screen shows result cards: deadlines, the saved document, the warranty, or a letter draft with **Copy** and **Make it firmer**.
