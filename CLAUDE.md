@@ -2,11 +2,6 @@
 
 Read `SPEC.md` before any task. It is the source of truth; if a request conflicts with it, say so before coding.
 
-## About the user
-- The user (Luis Miguel) is a beginner (1st year of a programming course, basic Java). He directs the project; you write the code.
-- After each task, explain in **Spanish**, in simple words, what you did, which files changed and how to test it (exact commands). Keep it short.
-- Code, comments, commit messages, README and UI text are in **English** (hackathon judges are English-speaking).
-
 ## How to work
 - Start every non-trivial task with a short plan and wait for approval.
 - Small steps: make one thing work, test it, then move on. Don't build features not in SPEC.md.

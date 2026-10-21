@@ -1,9 +1,11 @@
 // Calls every Duly MCP tool against a running server and prints the results.
+// Local servers only: it calls add_document, which saves a new document, so never point it
+// at the shared deployment. Start the server with STORAGE=memory so nothing reaches DynamoDB.
 // Usage:
-//   npm run dev                              (in another terminal)
+//   STORAGE=memory npm run dev               (in another terminal)
 //   npm run tools                            (text-only tests)
 //   npm run tools -- path/to/document.png    (also test add_document with a file)
-// Set MCP_URL to test another server, e.g. the Vercel deployment.
+// Set MCP_URL to test a local server on another port, e.g. http://localhost:3100/api/mcp.
 
 import { readFileSync } from "node:fs";
 import { extname } from "node:path";

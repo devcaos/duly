@@ -7,11 +7,16 @@ Documents 1-6 match the seed data in `lib/storage/seed.ts` (same issuers, amount
 numbers and day offsets). Document 7 is extra, for the live upload demo. The seed also has
 eight documents without a sample file (see "Seed-only documents" below).
 
-**Generated on 2026-10-17.** Dates are relative to that day, like the seed. Regenerate on
-demo day so the dates on paper match the seed and every deadline is upcoming:
+**Generated on 2026-10-17.** The dates printed on these files are fixed: they were relative to
+that day. The server's sample documents are different: they are rebuilt from today's date on
+every read, so they move every day. If you upload a sample file whose printed due date has
+already passed, the saved document will not show an upcoming deadline. Regenerate the files
+so the dates on paper match the seed on a given day:
 
 ```bash
-npm run samples
+npm run samples                                              # dates relative to today
+SAMPLES_TODAY=2026-10-23 npm run samples                     # fixed base date (macOS / Linux)
+$env:SAMPLES_TODAY="2026-10-23"; npm run samples             # fixed base date (Windows PowerShell)
 ```
 
 The script (`scripts/generate-samples.mjs`) uses a Chromium-based browser (Chrome,

@@ -2,6 +2,8 @@
 
 **Paperwork, duly handled.**
 
+Built for the **Alexa+ track** of the Amazon Developer Hackathon "Build, Ship, Shape" (plus the **AWS Builder** mini challenge).
+
 Duly is a remote MCP server that turns Alexa+ into a household paperwork manager. Give it a bill, a letter or a warranty and it remembers every deadline, explains the fine print in plain language and drafts replies, with short answers meant to be spoken. It runs on AWS (Amazon Bedrock, DynamoDB, S3 and Polly) and ships with fictional sample documents only.
 
 ## Try it
@@ -11,7 +13,7 @@ Duly is a remote MCP server that turns Alexa+ into a household paperwork manager
 | **MCP endpoint** (Streamable HTTP, no sign-in) | `https://duly-home.vercel.app/api/mcp` |
 | **Web demo** (Echo Show-style web demo that runs in any browser) | https://duly-home.vercel.app |
 
-The web demo simulates how Alexa+ would use Duly; it does not run on a real Echo Show device. Press the mic (Chrome or Edge) or type a question, or tap a suggestion chip.
+The web demo simulates how Alexa+ would use Duly; it does not run on a real Echo Show device. Press the mic or type a question, or tap a suggestion chip. Voice input needs Chrome or Edge: Brave blocks the browser's speech service, and on Edge the Windows setting **Online speech recognition** (Settings > Privacy & security > Speech) must be on.
 
 **Add Duly to Claude as a custom connector**
 
@@ -57,6 +59,7 @@ flowchart LR
 ```
 
 - **MCP server** ([`app/api/mcp/route.ts`](app/api/mcp/route.ts)): `mcp-handler` + the official MCP TypeScript SDK, stateless Streamable HTTP. Every tool returns a short spoken sentence plus `structuredContent` with the full data for screens. Requests are rate-limited per IP.
+- **Protocol versions**: the server speaks both. Clients that start with the `initialize` handshake (MCP Inspector, `npm run tools`) negotiate **2025-11-25**, the SDK's latest handshake version. The web demo's own client uses the SDK's `versionNegotiation: { mode: "auto" }` ([`lib/agent/mcpClient.ts`](lib/agent/mcpClient.ts)), which speaks **2026-07-28** (`server/discover` instead of `initialize`). That is why `FRICTION.md` mentions both: the `subscriptions/listen` entry is about 2026-07-28 clients.
 - **Storage adapter** ([`lib/storage/`](lib/storage/)): `STORAGE=aws` (DynamoDB + S3) or `STORAGE=memory` (in-process). Both adapters store only uploaded documents and add the sample documents on every read ([`lib/storage/merge.ts`](lib/storage/merge.ts)).
 - **LLM adapter** ([`lib/llm/`](lib/llm/)): `LLM_PROVIDER=bedrock` or `gemini`, with an optional `LLM_FALLBACK`.
 - **Web demo**: [`app/api/chat/route.ts`](app/api/chat/route.ts) runs a Bedrock Converse agent ([`lib/agent/agent.ts`](lib/agent/agent.ts)) that is an **MCP client of Duly's own `/api/mcp`** ([`lib/agent/mcpClient.ts`](lib/agent/mcpClient.ts)): it lists the tools over MCP, lets the model pick one and calls it over MCP, the same way Alexa+ would.
@@ -79,6 +82,8 @@ When a company has several bills, search, explanations and drafts always use the
 ### Sample data
 
 14 fictional documents (marked SAMPLE): an electricity bill, a car insurance renewal, a dishwasher receipt with warranty, a parking notice, a gym auto-renewal and a school field-trip form, plus four more warranties (a TV, a fridge that is about to run out, an expired washing machine and a laptop) and two earlier electricity and water bills each, so bills can be compared (the electricity bills also store their kWh usage). All dates are relative to today: the sample documents are never stored, the server rebuilds them from the date of each request (UTC) with both `STORAGE=memory` and `STORAGE=aws`, so their deadlines are always upcoming however long the deployment runs. A stored document with the same id as a sample document is ignored. The earlier bills are already paid and never show up as deadlines.
+
+The PNG/PDF files in [`samples/`](samples/) are different: the dates printed on them are fixed on the day they were generated, while the server's sample documents move with today's date. So if you upload a sample file whose printed due date has already passed, the saved document will not show an upcoming deadline. To get files whose dates match a given day, regenerate them with `npm run samples` (set `SAMPLES_TODAY=YYYY-MM-DD` for a fixed base date).
 
 ### More
 
@@ -104,9 +109,9 @@ Setup scripts (AWS SDK for JavaScript v3):
 
 If Bedrock is throttled, temporarily unavailable or times out, `LLM_FALLBACK=gemini` retries the same request with Google Gemini, and the server log says which provider answered (`[llm] answered by bedrock`). The fallback is **not** used for `AccessDenied`, validation or other client errors: those mean the AWS setup is wrong, so Duly logs `AWS is misconfigured` and returns a generic error. Logs only contain the error name, HTTP status and a short message (ARNs, account IDs and request IDs are masked), and tool callers never see configuration details.
 
-### IAM permissions (least privilege)
+### IAM permissions
 
-[`docs/iam-policy.json`](docs/iam-policy.json) is the exact policy of the IAM user that Duly runs with. Replace `ACCOUNT_ID` with your AWS account ID.
+[`docs/iam-policy.json`](docs/iam-policy.json) is the exact policy of the IAM user that Duly runs with. Replace `ACCOUNT_ID` with your AWS account ID. Every statement is scoped to Duly's own resources (one model, one table, one bucket), but the policy is not strictly minimal: it also allows some actions the code does not use today (see below).
 
 | Statement | Allows | Used by |
 |---|---|---|
@@ -116,6 +121,8 @@ If Bedrock is throttled, temporarily unavailable or times out, `LLM_FALLBACK=gem
 | `PollySpeech` | `SynthesizeSpeech` (Polly has no resource-level permissions, so `Resource` is `*`) | `app/api/speak/route.ts` |
 
 Three actions are only needed by `npm run setup:aws`: **`dynamodb:CreateTable`**, **`s3:CreateBucket`** and **`s3:PutBucketPublicAccessBlock`**. After the table and bucket exist you can remove them from the policy; the running server and `npm run seed:aws` don't use them.
+
+The code does not currently call these either: `bedrock:InvokeModelWithResponseStream` (Duly uses `Converse`, not streaming), `dynamodb:UpdateItem` and `dynamodb:Scan` (it uses `GetItem`, `PutItem`, `DeleteItem` and `Query`), and `s3:GetObject`, `s3:ListBucket` and `s3:GetBucketLocation` (it only uploads with `PutObject`). They stay in the policy because it is the real IAM user's policy, unchanged.
 
 > **The bucket must stay private.** `setup:aws` blocks all public access on every run. Never add a bucket policy, ACL or CloudFront rule that makes `duly-devcaos-files` public: it holds the original documents people upload.
 
@@ -148,7 +155,7 @@ What works with which settings:
 |---|---|
 | Nothing (defaults: `STORAGE=memory`, `LLM_PROVIDER=gemini`) | `npm run test:unit`; the MCP server with the sample documents; the tools that don't use an LLM (`list_deadlines`, `check_warranty`, `search_documents`, `compare_bills`, `weekly_brief`); the web demo's "Coming up" list. |
 | + `GEMINI_API_KEY` | Also `add_document`, `explain_document` and `draft_reply`. |
-| + `AWS_REGION`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` (IAM user with the [policy above](#iam-permissions-least-privilege)) | Bedrock (`LLM_PROVIDER=bedrock`), DynamoDB + S3 (`STORAGE=aws`, after `setup:aws`), Polly, and the web demo's questions (the `/api/chat` agent always uses Bedrock). |
+| + `AWS_REGION`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` (IAM user with the [policy above](#iam-permissions)) | Bedrock (`LLM_PROVIDER=bedrock`), DynamoDB + S3 (`STORAGE=aws`, after `setup:aws`), Polly, and the web demo's questions (the `/api/chat` agent always uses Bedrock). |
 | `npm run mock:aws` (no AWS account) | The web demo with canned answers, see [Test the web demo without AWS](#test-the-web-demo-without-aws). |
 
 With `STORAGE=memory`, documents you add can disappear when the server restarts; the sample documents always come back.
@@ -227,7 +234,7 @@ Remove the `AWS_ENDPOINT_URL_*` lines to use real AWS.
 
 ## How the web demo works
 
-- Press the **mic** and ask a question (Web Speech API, `en-US`, Chrome or Edge), or **type** it. Brave blocks the speech service, so in Brave the mic shows "Voice input doesn't work in Brave" instead of listening. The suggestion chips run the demo questions.
+- Press the **mic** and ask a question (Web Speech API, `en-US`, Chrome or Edge), or **type** it. Brave blocks the speech service, so in Brave the mic shows "Voice input doesn't work in Brave" instead of listening. On Edge, turn on **Online speech recognition** in Windows (Settings > Privacy & security > Speech). The suggestion chips run the demo questions.
 - **Add document** uploads a photo or PDF (JPEG, PNG or PDF, max 3 MB) and saves it with `add_document`.
 - The reply is spoken with **Amazon Polly** (neural voice). If Polly is unavailable, the browser's own voice reads it.
 - The screen shows result cards: deadlines, the saved document, the warranty, or a letter draft with **Copy** and **Make it firmer**.
