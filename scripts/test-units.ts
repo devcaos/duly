@@ -22,7 +22,7 @@ import { AwsStorage, fromItem, fromStoredItem, toItem } from "../lib/storage/aws
 import { liveDocuments, mergeWithSeed, pickDocument, UPLOAD_TTL_SECONDS, uploadExpiresAt } from "../lib/storage/merge";
 import { MemoryStorage } from "../lib/storage/memory";
 import { compareIssuerBills, isNoticeablyHigher, runCompareBills, usageSentence } from "../lib/tools/compareBills";
-import { DISPUTE_RULE, findProblems, isDisputeIntent, runDraftReply, templateDraft } from "../lib/tools/draftReply";
+import { DISPUTE_RULE, findProblems, isDisputeIntent, runDraftReply, templateDraft, toPlainText } from "../lib/tools/draftReply";
 import { runAddDocument } from "../lib/tools/addDocument";
 import { runListDeadlines } from "../lib/tools/listDeadlines";
 import { resolveDocument } from "../lib/tools/resolveDocument";
@@ -440,6 +440,18 @@ check("draft_reply: the template letter disputes the bill with its real amount a
   assert.equal(extension.subject, "Ask for a payment extension: Brightwave Energy electricity bill (Account number BW-4471-2209)");
 });
 
+check("draft_reply: HTML from the model becomes plain text", () => {
+  for (const br of ["<br>", "<br/>", "<br />", "<BR>", "<Br />"]) {
+    assert.equal(toPlainText(`a breakdown.${br}${br}Thank you.`), "a breakdown.\n\nThank you.");
+  }
+  assert.equal(toPlainText("<p>I dispute the bill.</p><p>Please <b>review</b> it.</p>").trim(), "I dispute the bill.\n\nPlease review it.");
+  assert.equal(toPlainText('See <a href="https://example.com">this</a> and <span class="x">that</span>.'), "See this and that.");
+  // Text that only looks like a tag is kept.
+  const plain = "Pay $84.20 within <5 days, if 3 < 4 and 5 > 2. Signed: [Your name]";
+  assert.equal(toPlainText(plain), plain);
+  assert.equal(toPlainText("One.\n\n\n\nTwo.<br><br><br>Three.\n \n\nFour."), "One.\n\nTwo.\n\nThree.\n\nFour.");
+});
+
 async function checkAsync(name: string, fn: () => Promise<void>) {
   await fn();
   passed++;
@@ -798,6 +810,32 @@ async function storageChecks() {
       assert.ok(prompts.at(-1)!.includes(DISPUTE_RULE));
       assert.match(disputed.structuredContent.body, /disput/i);
       assert.match(disputed.structuredContent.body, /84\.20/);
+    } finally {
+      setLlmForTests(undefined);
+    }
+  });
+
+  await checkAsync("draft_reply with a simulated LLM: no HTML in the letter, polite or firm", async () => {
+    const fake: LlmAdapter = {
+      async generateJson<T>(): Promise<T> {
+        const body =
+          "Dear Brightwave Energy,<br><br>I dispute the $84.20 bill.<br/><br/><br/>Please send an itemized breakdown.<br><br>" +
+          "Thank you for your attention to this matter.<br><br>Sincerely,<br>[Your name]";
+        return { subject: "Dispute:<br> <b>electricity bill</b>", body } as T;
+      },
+    };
+    setLlmForTests(fake);
+    try {
+      for (const tone of ["polite", "firm"] as const) {
+        const { structuredContent: draft } = await runDraftReply({ issuer: "Brightwave Energy", intent: DISPUTE, tone });
+        assert.doesNotMatch(`${draft.subject}\n${draft.body}`, /<\/?[a-z]/i);
+        assert.equal(draft.subject, "Dispute: electricity bill");
+        assert.equal(
+          draft.body,
+          "Dear Brightwave Energy,\n\nI dispute the $84.20 bill.\n\nPlease send an itemized breakdown.\n\n" +
+            "Thank you for your attention to this matter.\n\nSincerely,\n[Your name]",
+        );
+      }
     } finally {
       setLlmForTests(undefined);
     }

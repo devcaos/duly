@@ -356,6 +356,15 @@
   text-overflow: ellipsis;
 }
 
+/* Home: long titles wrap to two lines instead of being cut on one. */
+.homeRight .deadlineTitle {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  white-space: normal;
+}
+
 .deadlineIssuer {
   margin-top: 3px;
   color: var(--muted);
