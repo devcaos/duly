@@ -40,7 +40,8 @@ Rules:
 - Use only information that is in the document. Never invent amounts, dates or names. Leave optional fields out when unknown.
 - All dates are YYYY-MM-DD. Resolve relative dates ("within 14 days") using today's date given in the prompt.
 - Add one deadline for each date the household must act on: payments, renewals, reply-by dates, warranty end dates, appointments.
-- For receipts with a warranty use type "warranty", set "product" and add a "warranty_ends" deadline.- Write in English.`;
+- For receipts with a warranty use type "warranty", set "product" and add a "warranty_ends" deadline.
+- Write in English.`;
 
 export async function runAddDocument(input: {
   text?: string;
