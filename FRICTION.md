@@ -140,3 +140,13 @@ One entry per problem with an Amazon/AWS/MCP tool, SDK or doc.
 - **Severity:** minor (visible in the demo, no data problem)
 - **Workaround:** Normalize the model's text on the server before validating it: `<br>` variants and block tags become line breaks, other HTML tags are removed (only real tag names, so "<5 days" stays), and extra blank lines are collapsed. The prompt now also says "no HTML tags (never <br>)" and asks for `\n\n` between paragraphs. The smoke test fails if a letter contains HTML tags.
 - **Suggestion:** Say in the Nova prompting guide what "plain text" output looks like for string fields in tool/JSON output, and whether Nova may use HTML or markdown for line breaks inside JSON strings, so apps know to sanitize them.
+
+### Nova 2 Lite throttles a short test burst, and the 429 doesn't say which limit
+- **Tool / API / SDK:** Amazon Bedrock Converse API, Amazon Nova 2 Lite through the EU cross-region inference profile (`eu.amazon.nova-2-lite-v1:0`, `eu-west-1`)
+- **Task I attempted:** Run Duly's pre-PR checks on Oct 22, 2026 against a local server with real Bedrock and no fallback provider: `smoke:bedrock` (17 questions), `npm run tools` and a few letter drafts, one after another.
+- **Steps I took:** Ran the scripts back to back; each question makes one or two Converse calls (tool choice, then the tool's own call; a draft that fails its checks makes one more).
+- **Expected:** A few dozen calls over several minutes to stay within the default quota, or a 429 that names the quota that was hit.
+- **What actually happened:** One `draft_reply` call near the end got `ThrottlingException` (HTTP 429, "Too many requests, please wait before trying again."). The message doesn't say whether it was requests or tokens per minute, or whether the limit belongs to the inference profile or the account. The same call worked about 20 seconds later.
+- **Severity:** minor (a test run, not a user-facing outage)
+- **Workaround:** Retry after a short pause. In production Duly's `LLM_FALLBACK` answers when Bedrock is throttled; for these checks the fallback was off on purpose so every answer came from Bedrock.
+- **Suggestion:** Name the quota (and its current value) in the `ThrottlingException` message, and document the default per-minute quotas for Nova 2 Lite cross-region inference profiles next to the model card.
