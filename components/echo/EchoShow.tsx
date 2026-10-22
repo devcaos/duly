@@ -13,6 +13,7 @@ import {
   DraftCard,
   ExplanationCard,
   MatchesCard,
+  NoBreak,
   WarrantyCard,
 } from "./cards";
 import type { DeadlineItem, DraftData } from "./cards";
@@ -352,7 +353,7 @@ function ScreenView({
       <div className={styles.answerText}>
         {screen.query && <p className={`${styles.query} ${styles.enter}`}>“{screen.query}”</p>}
         <p className={`${styles.reply} ${replySize(screen.reply)} ${screen.error ? styles.replyError : ""} ${styles.enter}`}>
-          {screen.reply}
+          <NoBreak text={screen.reply} />
         </p>
         {screen.tools.length > 0 && (
           <p className={`${styles.toolTag} ${styles.enter}`}>

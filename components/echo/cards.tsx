@@ -135,6 +135,21 @@ const enterStyle = (index: number) => ({ "--delay": `${delayFor(index)}ms` }) as
 
 const label = (value: string) => value.replace(/_/g, " ");
 
+// Words joined by hyphens: "1-800-555-0142", "BW-4471-2209", "3rd-grade".
+const HYPHENATED = /([A-Za-z0-9]+(?:-[A-Za-z0-9]+)+)/;
+
+// Text where phone, reference and account numbers never break across lines at a hyphen.
+// Only the display changes: copied text stays the same.
+export function NoBreak({ text }: { text: string }) {
+  return (
+    <>
+      {text
+        .split(HYPHENATED)
+        .map((part, i) => (i % 2 === 1 && /\d/.test(part) ? <span key={i} className={styles.nowrap}>{part}</span> : part))}
+    </>
+  );
+}
+
 function CountUp({ value, delay, format }: { value: number; delay: number; format: (n: number) => string }) {
   return <>{format(useCountUp(value, delay))}</>;
 }
@@ -266,7 +281,9 @@ export function DocumentCard({ data }: { data: Record<string, unknown> }) {
         <span className={styles.paperTag}>{label(doc.type)}</span>
       </div>
       <h3 className={styles.paperTitle}>{doc.title}</h3>
-      <p className={styles.paperSub}>{doc.summary}</p>
+      <p className={styles.paperSub}>
+        <NoBreak text={doc.summary} />
+      </p>
       <div className={styles.fieldGrid}>
         <Field name="Issuer">{doc.issuer}</Field>
         <Field name="Amount">
@@ -290,7 +307,9 @@ export function DocumentCard({ data }: { data: Record<string, unknown> }) {
       {doc.actionItems.length > 0 && (
         <ul className={styles.actionList}>
           {doc.actionItems.slice(0, 3).map((item) => (
-            <li key={item}>{item}</li>
+            <li key={item}>
+              <NoBreak text={item} />
+            </li>
           ))}
         </ul>
       )}
@@ -357,7 +376,9 @@ export function WarrantyCard({ data }: { data: Record<string, unknown> }) {
           <div className={styles.eyebrow}>How to claim</div>
           <ul className={styles.claimList}>
             {warranty.howToClaim.slice(0, 3).map((step) => (
-              <li key={step}>{step}</li>
+              <li key={step}>
+                <NoBreak text={step} />
+              </li>
             ))}
           </ul>
         </div>
@@ -366,7 +387,10 @@ export function WarrantyCard({ data }: { data: Record<string, unknown> }) {
   );
 }
 
-// Every warranty on file: product, status, end date and how much of it is used.
+const VISIBLE_WARRANTIES = 4;
+
+// Every warranty on file (the first 4, then "+N more"): product, status, end date and how much
+// of it is used.
 function WarrantyList({ warranties }: { warranties: WarrantyInfo[] }) {
   if (warranties.length === 0) {
     return (
@@ -375,9 +399,10 @@ function WarrantyList({ warranties }: { warranties: WarrantyInfo[] }) {
       </div>
     );
   }
+  const visible = warranties.slice(0, VISIBLE_WARRANTIES);
   return (
     <div className={styles.stack}>
-      {warranties.map((warranty, i) => (
+      {visible.map((warranty, i) => (
         <div key={warranty.documentId} className={`${styles.card} ${styles.warrantyRow} ${styles.enter}`} style={enterStyle(i)}>
           <div className={styles.warrantyRowHead}>
             <div>
@@ -398,6 +423,11 @@ function WarrantyList({ warranties }: { warranties: WarrantyInfo[] }) {
           </div>
         </div>
       ))}
+      {warranties.length > visible.length && (
+        <div className={`${styles.listFooter} ${styles.enter}`} style={enterStyle(visible.length)}>
+          <span>+{warranties.length - visible.length} more</span>
+        </div>
+      )}
     </div>
   );
 }
@@ -435,7 +465,9 @@ export function DraftCard({
       <div className={styles.letterSubject}>
         <b>Subject</b> {draft.subject}
       </div>
-      <div className={styles.letterBody}>{draft.body}</div>
+      <div className={styles.letterBody}>
+        <NoBreak text={draft.body} />
+      </div>
       <div className={styles.letterActions}>
         <button type="button" className={styles.paperButton} onClick={copy}>
           {copied ? <CheckIcon /> : <CopyIcon />} {copied ? "Copied" : "Copy"}
@@ -469,7 +501,9 @@ export function ExplanationCard({ data }: { data: Record<string, unknown> }) {
       {sections.map(([title, text], i) => (
         <div key={title} className={`${styles.explainSection} ${styles.enter}`} style={enterStyle(i + 1)}>
           <span className={styles.fieldName}>{title}</span>
-          <p>{text}</p>
+          <p>
+            <NoBreak text={text} />
+          </p>
         </div>
       ))}
       {info.disclaimer && <p className={styles.disclaimer}>{info.disclaimer}</p>}
