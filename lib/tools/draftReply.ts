@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { getLlm } from "@/lib/llm";
-import { addDays, formatLongDate, formatMoney, todayISO } from "@/lib/dates";
+import { addDays, formatLongDate, formatMoney, plainDollars, todayISO } from "@/lib/dates";
 import { documentRefSchema } from "@/lib/schemas";
 import type { Document, ToolResult } from "@/lib/types";
 import { documentForPrompt } from "./explainDocument";
@@ -33,7 +33,7 @@ Rules:
 - Never give reasons or say what is wrong with a charge (no "error", "incorrect", "overcharged").
 - Ask for an itemized breakdown only when the goal is to dispute a bill, never for other requests (like a payment extension).
 - Use reference numbers exactly as listed, with the label they have (an account number is never a bill or invoice number).
-- Write dates like "October 5, 2026", never as YYYY-MM-DD.
+- Write dates like "October 5, 2026", never as YYYY-MM-DD. Write amounts like "$84.20", never with "USD".
 - body: only the paragraphs. No greeting ("Dear ...") and no sign-off ("Sincerely", your name): they are added automatically.
 - Never invent personal data: use placeholders like [Your address] or [Your phone] if needed.
 - Under 120 words, in English. Plain text only: no markdown and no HTML tags (never <br>). Separate paragraphs with a blank line (\\n\\n).`;
@@ -312,7 +312,7 @@ export function toPlainText(text: string): string {
 // punctuation ("Team,I", "date.We") separated.
 function normalize(draft: Draft): Draft {
   const tidy = (text: string) =>
-    toPlainText(text)
+    plainDollars(toPlainText(text))
       .replace(ISO_DATE, (iso) => formatLongDate(iso))
       .replace(/([,;])(?=[A-Za-z])/g, "$1 ")
       .replace(/([a-z])\.(?=[A-Z])/g, "$1. ")

@@ -72,6 +72,15 @@ export function formatMoney(amount: number, currency = "USD"): string {
   return new Intl.NumberFormat("en-US", { style: "currency", currency }).format(amount);
 }
 
+// "$45 USD", "$45.00 US dollars", "45 USD" and "USD 45" become "$45": the dollar sign says it all.
+// For text the model writes (letters, explanations, extracted summaries).
+export function plainDollars(text: string): string {
+  return text
+    .replace(/(\$\s?\d[\d,]*(?:\.\d+)?)\s*(?:USD|US\s?dollars?|dollars?)\b/gi, "$1")
+    .replace(/\bUSD\s?\$?\s?(\d[\d,]*(?:\.\d+)?)/g, "$$$1")
+    .replace(/\b(\d[\d,]*(?:\.\d+)?)\s?USD\b/g, "$$$1");
+}
+
 // "$0.204", "$0.0136": a price per kWh or per gallon, with 3 significant digits.
 export function formatUnitPrice(amount: number, currency = "USD"): string {
   return new Intl.NumberFormat("en-US", { style: "currency", currency, maximumSignificantDigits: 3 }).format(amount);

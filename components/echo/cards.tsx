@@ -3,6 +3,7 @@
 import { useState } from "react";
 import type { CSSProperties, ReactNode } from "react";
 import { daysBetween, formatMoney, formatSpokenDate, formatUnitPrice, perUnit } from "@/lib/dates";
+import { capitalizeFirst } from "@/lib/speech";
 import { useCountUp } from "./hooks";
 import styles from "./echo.module.css";
 
@@ -168,7 +169,8 @@ export function DeadlineRow({ item, index, compact = false }: { item: DeadlineIt
     <div className={`${styles.card} ${styles.deadlineRow} ${compact ? styles.compact : ""} ${styles.enter}`} style={enterStyle(index)}>
       <DateBlock iso={item.date} />
       <div className={styles.deadlineText}>
-        <div className={styles.deadlineTitle}>{item.description}</div>
+        {/* "fridge warranty ends" (built from a product name) starts with a capital letter. */}
+        <div className={styles.deadlineTitle}>{capitalizeFirst(item.description)}</div>
         <div className={styles.deadlineIssuer}>{item.issuer}</div>
       </div>
       <div className={styles.deadlineMeta}>

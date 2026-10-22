@@ -6,11 +6,11 @@ import assert from "node:assert/strict";
 import { itemFilterFor, keywordToolFor } from "../lib/agent/agent";
 import { itemWords, matchesItem } from "../lib/match";
 import { canSendToken } from "../lib/agent/mcpClient";
-import { addDays, formatLongDate, periodRange, todayISO } from "../lib/dates";
+import { addDays, formatLongDate, formatSpokenDate, periodRange, plainDollars, todayISO } from "../lib/dates";
 import { forbiddenHostResponse } from "../lib/hosts";
 import { allowRequest, MAX_TRACKED_KEYS } from "../lib/rateLimit";
 import { searchDocuments } from "../lib/search";
-import { limitSentences } from "../lib/speech";
+import { capitalizeFirst, cleanSpoken, limitSentences } from "../lib/speech";
 import { setLlmForTests } from "../lib/llm";
 import type { LlmAdapter } from "../lib/llm";
 import { getStorage, HOUSEHOLD_ID } from "../lib/storage";
@@ -24,7 +24,7 @@ import { liveDocuments, mergeWithSeed, pickDocument, UPLOAD_TTL_SECONDS, uploadE
 import { MemoryStorage } from "../lib/storage/memory";
 import { compareIssuerBills, isNoticeablyHigher, runCompareBills, usageSentence } from "../lib/tools/compareBills";
 import { disputeRule, findProblems, isDisputeIntent, runDraftReply, templateDraft, toPlainText } from "../lib/tools/draftReply";
-import { runAddDocument } from "../lib/tools/addDocument";
+import { runAddDocument, savedSentence } from "../lib/tools/addDocument";
 import { runListDeadlines } from "../lib/tools/listDeadlines";
 import { resolveDocument } from "../lib/tools/resolveDocument";
 import { runWeeklyBrief } from "../lib/tools/weeklyBrief";
@@ -477,6 +477,66 @@ check("draft_reply: the template letter disputes the bill with its real amount a
   const extension = templateDraft(brightwave, "ask for a payment extension", "firm", refs, replyBy);
   assert.match(extension.body, /^I am writing to ask for a payment extension regarding Brightwave Energy electricity bill/);
   assert.equal(extension.subject, "Ask for a payment extension: Brightwave Energy electricity bill (Account number BW-4471-2209)");
+});
+
+check("add_document confirmation: natural phrasing, no repeated words, amounts only for payments", () => {
+  const today = todayISO();
+  const doc = (fields: Partial<Document>): Document => ({
+    id: "doc-unit-saved",
+    householdId: "unit",
+    type: "bill",
+    title: "Unit",
+    issuer: "Unit Sender",
+    deadlines: [],
+    summary: "",
+    actionItems: [],
+    rawText: "",
+    createdAt: `${today}T09:00:00.000Z`,
+    ...fields,
+  });
+  const date = formatSpokenDate(addDays(today, 5));
+  const school = doc({
+    type: "school",
+    issuer: "Maplewood Elementary School",
+    amount: 15,
+    currency: "USD",
+    deadlines: [{ date: addDays(today, 5), kind: "reply_by", description: "Return the form", amount: 15, currency: "USD" }],
+  });
+  assert.equal(savedSentence(school), `Saved: Maplewood Elementary School, reply by ${date}, $15.00 to pay.`);
+  // A reply-by date without a fee, and an appointment: no document amount slips in.
+  const form = doc({ ...school, deadlines: [{ date: addDays(today, 5), kind: "reply_by", description: "Reply" }] });
+  assert.equal(savedSentence(form), `Saved: Maplewood Elementary School, reply by ${date}.`);
+  const visit = doc({ ...school, deadlines: [{ date: addDays(today, 5), kind: "appointment", description: "Trip" }] });
+  assert.equal(savedSentence(visit), `Saved: Maplewood Elementary School, appointment on ${date}.`);
+  const receipt = doc({
+    type: "warranty",
+    issuer: "HomeHub Appliances",
+    amount: 549.99,
+    deadlines: [{ date: addDays(today, 5), kind: "warranty_ends", description: "Warranty ends" }],
+  });
+  assert.equal(savedSentence(receipt), `Saved: HomeHub Appliances warranty, it ends on ${date}.`);
+  const water = doc({
+    issuer: "Riverside Water Company",
+    amount: 56.75,
+    deadlines: [{ date: addDays(today, 5), kind: "payment_due", description: "Pay water bill", amount: 56.75 }],
+  });
+  assert.equal(savedSentence(water), `Saved: Riverside Water Company bill, $56.75 due ${date}.`);
+  assert.equal(savedSentence(doc({ type: "other" })), "Saved: Unit Sender document. I didn't find any upcoming deadline.");
+  for (const d of [school, form, visit, receipt, water]) assert.doesNotMatch(savedSentence(d), /\b(\w+) \1\b|by on/i);
+});
+
+check('currency: "$45 USD" is "$45", in letters and in speech', () => {
+  assert.equal(plainDollars("The fine is $45 USD."), "The fine is $45.");
+  assert.equal(plainDollars("Pay $45.00 USD or 90 USD later, USD 1,200.50 in total, $5 US dollars."), "Pay $45.00 or $90 later, $1,200.50 in total, $5.");
+  assert.equal(plainDollars("Pay $84.20 by October 31."), "Pay $84.20 by October 31.");
+  assert.equal(cleanSpoken("The fine is $45 USD and doubles to $90 USD."), "The fine is $45 and doubles to $90.");
+});
+
+check("speech: sentences built from item names start with a capital letter", () => {
+  assert.equal(capitalizeFirst("fridge warranty ends"), "Fridge warranty ends");
+  assert.equal(cleanSpoken("fridge warranty ends soon. dishwasher is fine."), "Fridge warranty ends soon. Dishwasher is fine.");
+  // Amounts and already capitalized sentences are untouched.
+  assert.equal(cleanSpoken("$15.00 to Maplewood Elementary, due today."), "$15.00 to Maplewood Elementary, due today.");
 });
 
 check("draft_reply: an extension letter never asks for an itemized breakdown", () => {
