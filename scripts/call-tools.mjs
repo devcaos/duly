@@ -84,6 +84,9 @@ async function main() {
 
   await callTool("list_deadlines", {});
   await callTool("list_deadlines", { payable: true });
+  await callTool("list_deadlines", { kind: "renewal", query: "car insurance" });
+  // Not on file: says so, then lists the upcoming renewals.
+  await callTool("list_deadlines", { kind: "renewal", query: "home insurance" });
   await callTool("check_warranty", { product: "dishwasher" });
   await callTool("check_warranty", { product: "fridge" });
   await callTool("check_warranty", { product: "washing machine" });

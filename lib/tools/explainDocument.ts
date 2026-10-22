@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { getLlm } from "@/lib/llm";
-import { todayISO } from "@/lib/dates";
+import { plainDollars, todayISO } from "@/lib/dates";
 import { documentRefSchema } from "@/lib/schemas";
 import { limitSentences } from "@/lib/speech";
 import type { Document, ToolResult } from "@/lib/types";
@@ -28,6 +28,7 @@ Rules:
 - Base everything on the document data given. Never invent amounts, dates or rules.
 - Consequences (consequencesOfInaction and spokenAnswer) must come from the document data, e.g. "the fine goes up to $90 after the deadline". Never add consequences it doesn't state, such as collection actions, court, credit scores or extra fees. If the data says nothing about what happens, say the document doesn't say and suggest asking the issuer.
 - spokenAnswer is for voice: at most 2 short sentences, no lists, no markdown.
+- Write amounts like "$45", never with "USD".
 - Do not give legal advice. Explain, and recommend contacting the issuer or a professional when appropriate.`;
 
 export async function runExplainDocument(input: {
@@ -41,11 +42,19 @@ export async function runExplainDocument(input: {
   const doc = await resolveDocument(hasReference ? input : { query: input.question });
   const question = input.question ?? "What does this document mean and what should I do?";
 
-  const result = await getLlm().generateJson({
+  const answer = await getLlm().generateJson({
     system: SYSTEM_PROMPT,
     prompt: `Today's date: ${todayISO()}.\n\nDocument:\n${documentForPrompt(doc)}\n\nQuestion: ${question}`,
     schema: explanationSchema,
   });
+  // "$45 USD" → "$45" in everything shown or spoken.
+  const result = {
+    ...answer,
+    spokenAnswer: plainDollars(answer.spokenAnswer),
+    explanation: plainDollars(answer.explanation),
+    consequencesOfInaction: plainDollars(answer.consequencesOfInaction),
+    recommendedNextStep: plainDollars(answer.recommendedNextStep),
+  };
 
   const needsDisclaimer =
     result.legalOrFinancial || ["official_letter", "contract", "insurance"].includes(doc.type);

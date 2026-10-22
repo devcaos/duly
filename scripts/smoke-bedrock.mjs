@@ -22,6 +22,7 @@ const BRIGHTWAVE_USAGE = /22% higher.*You used about 22% more electricity than u
 // Single questions, each with an empty history (like the first thing said to Alexa).
 // says: the spoken reply must match. documentId: the document the tool must use.
 // noEarlierBills: no earlier bill may appear in the deadlines card.
+// onlyIssuer: the deadlines card must list only (and at least one) deadline from this issuer.
 // letter: the draft must dispute the bill, with its amount and no reason (letter check).
 const SINGLE = [
   { message: "What do I need to pay this month?", tool: "list_deadlines", noEarlierBills: true },
@@ -32,6 +33,13 @@ const SINGLE = [
   { message: "Is my Brightwave bill higher than usual?", tool: "compare_bills", says: BRIGHTWAVE_USAGE },
   { message: "Give me my weekly brief.", tool: "weekly_brief" },
   { message: "Is my fridge still under warranty?", tool: "check_warranty", says: /expiring soon/i },
+  // About the car insurance only, never the nearest other renewal (PeakFit).
+  {
+    message: "When does the car insurance renew?",
+    tool: "list_deadlines",
+    says: /^Northpoint Mutual: .*renews/,
+    onlyIssuer: "Northpoint Mutual",
+  },
   {
     message: "Write a firm letter to Brightwave Energy disputing my bill.",
     tool: "draft_reply",
@@ -156,6 +164,12 @@ async function run(title, questions, keepHistory) {
     if (question.noEarlierBills) {
       const listed = result.cards.flatMap((card) => card.data.deadlines ?? []).map((d) => d.documentId);
       if (listed.some((id) => id.includes("-prev-"))) problems.push("an earlier bill was listed as a deadline");
+    }
+    if (question.onlyIssuer) {
+      const issuers = result.cards.flatMap((card) => card.data.deadlines ?? []).map((d) => d.issuer);
+      if (issuers.length === 0 || issuers.some((issuer) => issuer !== question.onlyIssuer)) {
+        problems.push(`expected only ${question.onlyIssuer} deadlines, got ${[...new Set(issuers)].join(", ") || "none"}`);
+      }
     }
     if (problems.length > 0) failures++;
     routes[result.route] = (routes[result.route] ?? 0) + 1;

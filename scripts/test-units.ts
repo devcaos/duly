@@ -3,13 +3,14 @@
 // Usage: npm run test:unit   (exit code 1 on the first failed check)
 
 import assert from "node:assert/strict";
-import { keywordToolFor } from "../lib/agent/agent";
+import { itemFilterFor, keywordToolFor } from "../lib/agent/agent";
+import { itemWords, matchesItem } from "../lib/match";
 import { canSendToken } from "../lib/agent/mcpClient";
-import { addDays, periodRange, todayISO } from "../lib/dates";
+import { addDays, formatLongDate, formatSpokenDate, periodRange, plainDollars, todayISO } from "../lib/dates";
 import { forbiddenHostResponse } from "../lib/hosts";
 import { allowRequest, MAX_TRACKED_KEYS } from "../lib/rateLimit";
 import { searchDocuments } from "../lib/search";
-import { limitSentences } from "../lib/speech";
+import { capitalizeFirst, cleanSpoken, limitSentences } from "../lib/speech";
 import { setLlmForTests } from "../lib/llm";
 import type { LlmAdapter } from "../lib/llm";
 import { getStorage, HOUSEHOLD_ID } from "../lib/storage";
@@ -22,8 +23,8 @@ import { AwsStorage, fromItem, fromStoredItem, toItem } from "../lib/storage/aws
 import { liveDocuments, mergeWithSeed, pickDocument, UPLOAD_TTL_SECONDS, uploadExpiresAt } from "../lib/storage/merge";
 import { MemoryStorage } from "../lib/storage/memory";
 import { compareIssuerBills, isNoticeablyHigher, runCompareBills, usageSentence } from "../lib/tools/compareBills";
-import { DISPUTE_RULE, findProblems, isDisputeIntent, runDraftReply, templateDraft, toPlainText } from "../lib/tools/draftReply";
-import { runAddDocument } from "../lib/tools/addDocument";
+import { disputeRule, findProblems, isDisputeIntent, runDraftReply, templateDraft, toPlainText } from "../lib/tools/draftReply";
+import { runAddDocument, savedSentence } from "../lib/tools/addDocument";
 import { runListDeadlines } from "../lib/tools/listDeadlines";
 import { resolveDocument } from "../lib/tools/resolveDocument";
 import { runWeeklyBrief } from "../lib/tools/weeklyBrief";
@@ -227,6 +228,44 @@ check('keyword fallback: "summarize my insurance letter" is an explanation, not 
   assert.equal(keywordToolFor("Give me a summary of this letter."), "explain_document");
 });
 
+// Questions about one item, and general questions that must stay unfiltered.
+const GENERAL_DATE_QUESTIONS = [
+  "When is my next payment due?",
+  "What renews soon?",
+  "When does my stuff expire?",
+  "What do I need to pay this month?",
+  "What's due this week?",
+  "When are my bills due?",
+  "When does anything renew?",
+];
+
+check("item filter: the car insurance chip names the item, general questions name none", () => {
+  assert.equal(keywordToolFor("When does the car insurance renew?"), "list_deadlines");
+  assert.deepEqual(itemFilterFor("When does the car insurance renew?"), { query: "car insurance", kind: "renewal" });
+  assert.deepEqual(itemFilterFor("when's the parking fine due?"), { query: "parking fine" });
+  // The rest of the message never becomes part of the item's name.
+  assert.deepEqual(itemFilterFor("When is my Brightwave bill due and how much is it?"), { query: "brightwave" });
+  for (const message of GENERAL_DATE_QUESTIONS) {
+    assert.deepEqual(itemFilterFor(message), {}, message);
+    assert.deepEqual(itemWords(message), [], message);
+  }
+});
+
+check("item match: every item word must be in the document, with simple variations", () => {
+  const seed = buildSeedDocuments(todayISO());
+  const ids = (query: string) => seed.filter((doc) => matchesItem(doc, query)).map((doc) => doc.id);
+  for (const query of ["car insurance", "Car Insurance", "auto insurance policy", "Northpoint", "vehicle insurance"]) {
+    assert.deepEqual(ids(query), ["doc-northpoint-car-insurance"], query);
+  }
+  assert.deepEqual(ids("home insurance"), []);
+  assert.deepEqual(ids("coffee machine"), []);
+  assert.deepEqual(ids("gym membership"), ["doc-peakfit-renewal"]);
+  assert.deepEqual(ids("dish washer"), ["doc-homehub-dishwasher"]);
+  assert.deepEqual(ids("refrigerator"), ["doc-frostline-fridge"]);
+  // "car" is a whole word: it never matches "card" or "cards".
+  assert.equal(matchesItem({ ...seed[4], summary: "We charge the card on file." }, "car"), false);
+});
+
 // A fake bill for the threshold checks.
 function bill(id: string, amount: number, daysAgo: number): Document {
   const today = todayISO();
@@ -424,7 +463,7 @@ check("draft_reply: the template letter disputes the bill with its real amount a
   const firm = templateDraft(brightwave, DISPUTE, "firm", refs, replyBy);
   assert.match(firm.body, /^I dispute the \$84\.20 charge on your Brightwave Energy electricity bill \(Account number BW-4471-2209\), dated [A-Z][a-z]+ \d{1,2}, \d{4}\./);
   assert.match(firm.body, /itemized breakdown/);
-  assert.match(firm.body, /Please reply in writing by October 25, 2026\.$/);
+  assert.match(firm.body, /I expect a written response by October 25, 2026\.$/);
   assert.doesNotMatch(firm.body, /\b(error|incorrect|mistake|overcharg\w*|wrong|legal)\b/i);
   assert.equal(firm.subject, "Dispute: Brightwave Energy electricity bill (Account number BW-4471-2209)");
   // It passes the validator's dispute checks itself.
@@ -438,6 +477,107 @@ check("draft_reply: the template letter disputes the bill with its real amount a
   const extension = templateDraft(brightwave, "ask for a payment extension", "firm", refs, replyBy);
   assert.match(extension.body, /^I am writing to ask for a payment extension regarding Brightwave Energy electricity bill/);
   assert.equal(extension.subject, "Ask for a payment extension: Brightwave Energy electricity bill (Account number BW-4471-2209)");
+});
+
+check("add_document confirmation: natural phrasing, no repeated words, amounts only for payments", () => {
+  const today = todayISO();
+  const doc = (fields: Partial<Document>): Document => ({
+    id: "doc-unit-saved",
+    householdId: "unit",
+    type: "bill",
+    title: "Unit",
+    issuer: "Unit Sender",
+    deadlines: [],
+    summary: "",
+    actionItems: [],
+    rawText: "",
+    createdAt: `${today}T09:00:00.000Z`,
+    ...fields,
+  });
+  const date = formatSpokenDate(addDays(today, 5));
+  const school = doc({
+    type: "school",
+    issuer: "Maplewood Elementary School",
+    amount: 15,
+    currency: "USD",
+    deadlines: [{ date: addDays(today, 5), kind: "reply_by", description: "Return the form", amount: 15, currency: "USD" }],
+  });
+  assert.equal(savedSentence(school), `Saved: Maplewood Elementary School, reply by ${date}, $15.00 to pay.`);
+  // A reply-by date without a fee, and an appointment: no document amount slips in.
+  const form = doc({ ...school, deadlines: [{ date: addDays(today, 5), kind: "reply_by", description: "Reply" }] });
+  assert.equal(savedSentence(form), `Saved: Maplewood Elementary School, reply by ${date}.`);
+  const visit = doc({ ...school, deadlines: [{ date: addDays(today, 5), kind: "appointment", description: "Trip" }] });
+  assert.equal(savedSentence(visit), `Saved: Maplewood Elementary School, appointment on ${date}.`);
+  const receipt = doc({
+    type: "warranty",
+    issuer: "HomeHub Appliances",
+    amount: 549.99,
+    deadlines: [{ date: addDays(today, 5), kind: "warranty_ends", description: "Warranty ends" }],
+  });
+  assert.equal(savedSentence(receipt), `Saved: HomeHub Appliances warranty, it ends on ${date}.`);
+  const water = doc({
+    issuer: "Riverside Water Company",
+    amount: 56.75,
+    deadlines: [{ date: addDays(today, 5), kind: "payment_due", description: "Pay water bill", amount: 56.75 }],
+  });
+  assert.equal(savedSentence(water), `Saved: Riverside Water Company bill, $56.75 due ${date}.`);
+  assert.equal(savedSentence(doc({ type: "other" })), "Saved: Unit Sender document. I didn't find any upcoming deadline.");
+  for (const d of [school, form, visit, receipt, water]) assert.doesNotMatch(savedSentence(d), /\b(\w+) \1\b|by on/i);
+});
+
+check('currency: "$45 USD" is "$45", in letters and in speech', () => {
+  assert.equal(plainDollars("The fine is $45 USD."), "The fine is $45.");
+  assert.equal(plainDollars("Pay $45.00 USD or 90 USD later, USD 1,200.50 in total, $5 US dollars."), "Pay $45.00 or $90 later, $1,200.50 in total, $5.");
+  assert.equal(plainDollars("Pay $84.20 by October 31."), "Pay $84.20 by October 31.");
+  assert.equal(cleanSpoken("The fine is $45 USD and doubles to $90 USD."), "The fine is $45 and doubles to $90.");
+});
+
+check("speech: sentences built from item names start with a capital letter", () => {
+  assert.equal(capitalizeFirst("fridge warranty ends"), "Fridge warranty ends");
+  assert.equal(cleanSpoken("fridge warranty ends soon. dishwasher is fine."), "Fridge warranty ends soon. Dishwasher is fine.");
+  // Amounts and already capitalized sentences are untouched.
+  assert.equal(cleanSpoken("$15.00 to Maplewood Elementary, due today."), "$15.00 to Maplewood Elementary, due today.");
+});
+
+check("draft_reply: an extension letter never asks for an itemized breakdown", () => {
+  const brightwave = buildSeedDocuments(todayISO()).find((doc) => doc.id === "doc-brightwave-bill")!;
+  const replyBy = "October 25, 2026";
+  for (const tone of ["polite", "firm"] as const) {
+    const draft = templateDraft(brightwave, "ask for a payment extension", tone, [], replyBy);
+    assert.doesNotMatch(draft.body, /itemi[sz]ed|breakdown/i, tone);
+    const style = { tone, replyBy, amount: 84.2 };
+    assert.deepEqual(findProblems(draft, new Set(["84.2", "2026", "25", "31"]), [], undefined, style), [], tone);
+  }
+  // A model letter that asks for one is sent back; a dispute may ask for it.
+  const asked = letter("I am requesting more time to pay the $84.20 bill. Please send an itemized breakdown.");
+  assert.ok(findProblems(asked, new Set(["84.2"]), []).some((p) => p.includes("itemized breakdown")));
+  assert.equal(findProblems(asked, new Set(["84.2"]), [], { intent: DISPUTE, amount: 84.2 }).some((p) => p.includes("itemized")), false);
+});
+
+check("draft_reply: polite asks courteously, firm is direct with the amount and a reply date", () => {
+  const brightwave = buildSeedDocuments(todayISO()).find((doc) => doc.id === "doc-brightwave-bill")!;
+  const replyBy = "October 25, 2026";
+  const polite = templateDraft(brightwave, DISPUTE, "polite", [], replyBy).body;
+  const firm = templateDraft(brightwave, DISPUTE, "firm", [], replyBy).body;
+  assert.match(polite, /^I would like to dispute .*\n\nCould you please /);
+  assert.match(firm, /^I dispute the \$84\.20 charge .*dated /);
+  assert.match(firm, /I expect a written response by October 25, 2026\./);
+  assert.doesNotMatch(firm, /kindly|I hope|grateful|if possible|sorry|I would like/i);
+  assert.notEqual(polite, firm);
+  assert.match(disputeRule("polite"), /I would like to dispute/);
+  assert.match(disputeRule("firm"), /"I dispute the \$X bill/);
+
+  const allowed = new Set(["84.2", "2026", "25"]);
+  const firmStyle = { tone: "firm" as const, replyBy, amount: 84.2 };
+  const vague = findProblems(letter("I kindly ask you to review my bill."), allowed, [], undefined, firmStyle);
+  assert.ok(vague.some((p) => p.includes(replyBy)));
+  assert.ok(vague.some((p) => p.includes("cite the amount")));
+  assert.ok(vague.some((p) => p.includes('"kindly"')));
+  const direct = letter(`I am requesting more time to pay the $84.20 bill. I expect a written response by ${replyBy}.`);
+  assert.deepEqual(findProblems(direct, allowed, [], undefined, firmStyle), []);
+  const politeStyle = { tone: "polite" as const, replyBy, amount: 84.2 };
+  assert.ok(findProblems(letter("Give me more time."), allowed, [], undefined, politeStyle).some((p) => p.includes("courteous")));
+  assert.deepEqual(findProblems(letter("Could you please give me more time?"), allowed, [], undefined, politeStyle), []);
 });
 
 check("draft_reply: HTML from the model becomes plain text", () => {
@@ -753,6 +893,144 @@ async function storageChecks() {
     assert.equal(month.structuredContent.deadlines.some((d) => d.kind === "warranty_ends"), false);
   });
 
+  await checkAsync("list_deadlines query: the car insurance renewal, never the gym's", async () => {
+    const { text, structuredContent } = await runListDeadlines({ kind: "renewal", query: "car insurance" });
+    assert.deepEqual(
+      structuredContent.deadlines.map((d) => d.documentId),
+      ["doc-northpoint-car-insurance"],
+    );
+    assert.equal(structuredContent.found, true);
+    assert.match(text, /^Northpoint Mutual: car insurance policy renews automatically on .+, in 21 days, for \$612\.00\.$/);
+    assert.doesNotMatch(text, /PeakFit/);
+    // The chip's filter, as the agent builds it, gives the same answer.
+    const chip = await runListDeadlines(itemFilterFor("When does the car insurance renew?"));
+    assert.equal(chip.text, text);
+    // Kind payment_due for a renewal: still the car insurance, not another payment.
+    const due = await runListDeadlines({ kind: "payment_due", query: "auto insurance policy" });
+    assert.deepEqual(
+      due.structuredContent.deadlines.map((d) => d.documentId),
+      ["doc-northpoint-car-insurance"],
+    );
+  });
+
+  await checkAsync("list_deadlines query: an item that isn't on file says so, then lists that kind", async () => {
+    const { text, structuredContent } = await runListDeadlines({ kind: "renewal", query: "home insurance" });
+    assert.equal(structuredContent.found, false);
+    assert.match(text, /^I couldn't find a renewal for home insurance\. Upcoming renewals: PeakFit on .+, and Northpoint Mutual on .+\.$/);
+    assert.deepEqual(
+      structuredContent.deadlines.map((d) => d.issuer),
+      ["PeakFit", "Northpoint Mutual"],
+    );
+    // An item on file without an upcoming deadline: the washing machine warranty ended last month.
+    const washer = await runListDeadlines({ query: "washing machine" });
+    assert.equal(washer.structuredContent.found, false);
+    assert.match(washer.text, /^I found your washing machine, but it has no upcoming deadline\. Upcoming deadlines: /);
+  });
+
+  await checkAsync("list_deadlines: general questions get no filter and the normal list", async () => {
+    const plain = await runListDeadlines({});
+    for (const message of GENERAL_DATE_QUESTIONS) {
+      const result = await runListDeadlines(itemFilterFor(message));
+      assert.equal(result.text, plain.text, message);
+    }
+    // A query that names no item is no filter.
+    assert.equal((await runListDeadlines({ query: "my bills" })).text, plain.text);
+    assert.equal((await runListDeadlines({ query: "stuff" })).text, plain.text);
+    assert.doesNotMatch(plain.text, /couldn't find/);
+  });
+
+  await checkAsync("list_deadlines: a natural question about each seed item returns that item", async () => {
+    const questions: [string, string][] = [
+      ["When is the electricity bill due?", "doc-brightwave-bill"],
+      ["When does the car insurance renew?", "doc-northpoint-car-insurance"],
+      ["When does the dishwasher warranty end?", "doc-homehub-dishwasher"],
+      ["When is the parking ticket due?", "doc-maplewood-parking"],
+      ["When does the gym membership renew?", "doc-peakfit-renewal"],
+      ["When is the field trip form due?", "doc-maplewood-field-trip"],
+      ["When does the TV warranty end?", "doc-visionmax-tv"],
+      ["When does the fridge warranty expire?", "doc-frostline-fridge"],
+      ["When does the laptop warranty end?", "doc-pinewood-laptop"],
+    ];
+    for (const [message, id] of questions) {
+      const { structuredContent, text } = await runListDeadlines(itemFilterFor(message));
+      assert.equal(structuredContent.found, true, message);
+      assert.equal(structuredContent.deadlines[0].documentId, id, message);
+      assert.ok(structuredContent.deadlines.every((d) => d.documentId === id), message);
+      assert.doesNotMatch(text, /couldn't find/, message);
+    }
+  });
+
+  await checkAsync("check_warranty: each seed warranty by name and variations, never another product", async () => {
+    const products: [string, string][] = [
+      ["dishwasher", "doc-homehub-dishwasher"],
+      ["dish washer", "doc-homehub-dishwasher"],
+      ["dishwasher warranty", "doc-homehub-dishwasher"],
+      ["TV", "doc-visionmax-tv"],
+      ["television", "doc-visionmax-tv"],
+      ["fridge", "doc-frostline-fridge"],
+      ["refrigerator", "doc-frostline-fridge"],
+      ["washing machine", "doc-aquaspin-washer"],
+      ["washer", "doc-aquaspin-washer"],
+      ["laptop", "doc-pinewood-laptop"],
+      ["Pinewood computer", "doc-pinewood-laptop"],
+    ];
+    for (const [product, id] of products) {
+      const { structuredContent } = await runCheckWarranty({ product });
+      assert.equal(structuredContent.warranty?.documentId, id, product);
+    }
+    for (const product of ["coffee machine", "Samsung TV", "car"]) {
+      const { structuredContent, text } = await runCheckWarranty({ product });
+      assert.equal(structuredContent.found, false, product);
+      assert.equal(text, `I couldn't find a warranty for ${product}.`);
+    }
+  });
+
+  await checkAsync("document lookups: two natural phrasings find each of the 14 seed documents", async () => {
+    const seed = buildSeedDocuments(todayISO());
+    assert.equal(seed.length, 14);
+    // "September": earlier bills are named by their month.
+    const month = (id: string) => seed.find((doc) => doc.id === id)!.title.match(/, (\w+) \(SAMPLE\)/)![1];
+    const items: [string, string, string][] = [
+      ["doc-brightwave-bill", "Brightwave Energy", "electricity bill"],
+      ["doc-northpoint-car-insurance", "Northpoint Mutual", "car insurance"],
+      ["doc-homehub-dishwasher", "HomeHub Appliances", "dishwasher receipt"],
+      ["doc-maplewood-parking", "City of Maplewood", "parking notice"],
+      ["doc-peakfit-renewal", "PeakFit", "gym membership"],
+      ["doc-maplewood-field-trip", "Maplewood Elementary", "field trip form"],
+      ["doc-visionmax-tv", "VisionMax", "TV receipt"],
+      ["doc-frostline-fridge", "FrostLine", "fridge receipt"],
+      ["doc-aquaspin-washer", "AquaSpin", "washing machine receipt"],
+      ["doc-pinewood-laptop", "Pinewood Computers", "laptop receipt"],
+      ["doc-brightwave-bill-prev-1", "Brightwave Energy", `${month("doc-brightwave-bill-prev-1")} electricity bill`],
+      ["doc-brightwave-bill-prev-2", "Brightwave Energy", `${month("doc-brightwave-bill-prev-2")} electricity bill`],
+      ["doc-riverside-water-prev-1", "Riverside Water Company", `${month("doc-riverside-water-prev-1")} water bill`],
+      ["doc-riverside-water-prev-2", "Riverside Water Company", `${month("doc-riverside-water-prev-2")} water bill`],
+    ];
+    assert.deepEqual(items.map(([id]) => id).sort(), seed.map((doc) => doc.id).sort());
+    for (const [id, issuer, item] of items) {
+      for (const query of [`Explain my ${item} letter`, `Write a reply to ${issuer} about my ${item}`]) {
+        assert.equal((await resolveDocument({ query })).id, id, query);
+      }
+      // As Nova sends it: the sender in issuer, the item in query.
+      assert.equal((await resolveDocument({ issuer, query: item })).id, id, `${issuer} / ${item}`);
+    }
+    assert.equal(
+      (await resolveDocument({ query: "Write a reply to Brightwave Energy disputing my electricity bill." })).id,
+      "doc-brightwave-bill",
+    );
+  });
+
+  await checkAsync("document lookups: another kind of item is never the answer", async () => {
+    await assert.rejects(resolveDocument({ query: "Explain my home insurance letter" }), {
+      message: "I couldn't find any document about home insurance.",
+    });
+    await assert.rejects(resolveDocument({ query: "phone bill" }), /couldn't find any document about phone bill/);
+    // "fine" and "phone number" are not kinds of item: the lookup works as before.
+    assert.equal((await resolveDocument({ query: "Is this parking letter fine?" })).id, "doc-maplewood-parking");
+    assert.equal((await resolveDocument({ query: "the phone number on my dishwasher receipt" })).id, "doc-homehub-dishwasher");
+    assert.equal((await resolveDocument({ query: "Explain the parking fine letter." })).id, "doc-maplewood-parking");
+  });
+
   await checkAsync('check_warranty says "expired" and "expiring soon" clearly', async () => {
     const fridge = await runCheckWarranty({ product: "fridge" });
     assert.equal(fridge.structuredContent.warranty?.status, "expiring_soon");
@@ -794,20 +1072,22 @@ async function storageChecks() {
     const fake: LlmAdapter = {
       async generateJson<T>({ prompt }: { prompt: string }): Promise<T> {
         prompts.push(prompt);
-        const body = prompt.includes(DISPUTE_RULE)
+        const body = prompt.includes(disputeRule("firm"))
           ? "I dispute the $84.20 bill.\n\nPlease review it and send me an itemized breakdown."
           : "I am requesting more time to pay the $84.20 bill.";
-        return { subject: "Brightwave bill", body } as T;
+        // A firm letter asks for a written response by the date in the prompt.
+        const replyBy = prompt.match(/written response by ([A-Z][a-z]+ \d{1,2}, \d{4})/)?.[1];
+        return { subject: "Brightwave bill", body: `${body}\n\nI expect a written response by ${replyBy}.` } as T;
       },
     };
     setLlmForTests(fake);
     try {
       await runDraftReply({ issuer: "Brightwave Energy", intent: "ask for a payment extension", tone: "firm" });
       assert.equal(prompts.length, 1);
-      assert.equal(prompts[0].includes(DISPUTE_RULE), false);
+      assert.equal(prompts[0].includes(disputeRule("firm")), false);
 
       const disputed = await runDraftReply({ issuer: "Brightwave Energy", intent: "dispute my electricity bill", tone: "firm" });
-      assert.ok(prompts.at(-1)!.includes(DISPUTE_RULE));
+      assert.ok(prompts.at(-1)!.includes(disputeRule("firm")));
       assert.match(disputed.structuredContent.body, /disput/i);
       assert.match(disputed.structuredContent.body, /84\.20/);
     } finally {
@@ -816,11 +1096,13 @@ async function storageChecks() {
   });
 
   await checkAsync("draft_reply with a simulated LLM: no HTML in the letter, polite or firm", async () => {
+    // The reply-by date the firm tone asks for (today + 7 days).
+    const replyBy = formatLongDate(addDays(todayISO(), 7));
     const fake: LlmAdapter = {
       async generateJson<T>(): Promise<T> {
         const body =
           "Dear Brightwave Energy,<br><br>I dispute the $84.20 bill.<br/><br/><br/>Please send an itemized breakdown.<br><br>" +
-          "Thank you for your attention to this matter.<br><br>Sincerely,<br>[Your name]";
+          `I expect a written response by ${replyBy}.<br><br>Sincerely,<br>[Your name]`;
         return { subject: "Dispute:<br> <b>electricity bill</b>", body } as T;
       },
     };
@@ -833,7 +1115,7 @@ async function storageChecks() {
         assert.equal(
           draft.body,
           "Dear Brightwave Energy,\n\nI dispute the $84.20 bill.\n\nPlease send an itemized breakdown.\n\n" +
-            "Thank you for your attention to this matter.\n\nSincerely,\n[Your name]",
+            `I expect a written response by ${replyBy}.\n\nSincerely,\n[Your name]`,
         );
       }
     } finally {

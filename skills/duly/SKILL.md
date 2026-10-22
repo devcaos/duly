@@ -24,8 +24,8 @@ An error result (`isError: true`) has one short text that is safe to say to the 
 
 ### list_deadlines
 - **When:** "What do I need to pay this month?", "what's due this week?", "when does the car insurance renew?".
-- **Inputs:** `from`, `to` (YYYY-MM-DD; default today through the next 30 days), `kind` (`payment_due`, `renewal`, `reply_by`, `warranty_ends`, `appointment`, `other`), `payable` (boolean). For questions about paying, use `payable: true`, not `kind`: it returns every deadline with an amount (bills, renewals, fees).
-- **Returns:** deadlines sorted by date, each with date, kind, description, amount, days left, document id, title and issuer. Speaks the count, the total (with `payable`) and the next one.
+- **Inputs:** `from`, `to` (YYYY-MM-DD; default today through the next 30 days), `kind` (`payment_due`, `renewal`, `reply_by`, `warranty_ends`, `appointment`, `other`), `payable` (boolean), `query` (one specific item or company, e.g. "car insurance", "PeakFit"). For questions about paying, use `payable: true`, not `kind`: it returns every deadline with an amount (bills, renewals, fees). For a question about one item, set `query`; leave it out for general questions.
+- **Returns:** deadlines sorted by date, each with date, kind, description, amount, days left, document id, title and issuer. Speaks the count, the total (with `payable`) and the next one. With `query` it looks ahead without the 30-day limit and answers about that item only; if the item isn't on file it says so (`found: false`) and lists the upcoming deadlines of that kind instead.
 - **Example:** "What do I need to pay this month?" → `{ payable: true, from: <today>, to: <last day of the month> }`
 
 ### check_warranty
@@ -56,7 +56,7 @@ An error result (`isError: true`) has one short text that is safe to say to the 
 ### draft_reply
 - **When:** "Write a reply to Brightwave Energy asking for a payment extension", "make it firmer".
 - **Inputs:** `intent` (required: what the reply should achieve), `query` / `issuer` / `document_id`, `tone` (`polite` default, or `firm`).
-- **Disputes:** keep the user's word in `intent` ("dispute my electricity bill"). The letter then says plainly that the user disputes the bill, with its amount and date, and asks for a review and an itemized breakdown, without giving reasons.
+- **Disputes:** keep the user's word in `intent` ("dispute my electricity bill"). The letter then says plainly that the user disputes the bill, with its amount and date, and asks for a review and an itemized breakdown, without giving reasons. Other letters (a payment extension, a cancellation) never ask for a breakdown. `tone: "firm"` is direct, cites the amount and asks for a written response by a date; `polite` asks courteously.
 - **Returns:** `subject` and a full `body` (greeting and sign-off included) that only uses the document's own numbers, dates and reference numbers. The spoken text never reads the letter: "Here's a polite draft to Brightwave Energy. Say "make it firmer" to change the tone."
 - **Changing the tone:** call it again with the same `document_id` and `intent` and the new `tone`.
 - **Example:** "Write a polite email to Brightwave Energy asking for a two-week payment extension." → `{ issuer: "Brightwave Energy", intent: "ask for a two-week payment extension" }`
@@ -88,7 +88,7 @@ Call exactly one tool per question. Never invent document ids: reuse one from an
 | "My warranties", "which warranties are active?" | `check_warranty` without `product` | |
 | "Write", "reply", "draft", "make it firmer / more polite" | `draft_reply` | Action words win over the topic. |
 | "Find my car insurance documents" | `search_documents` | Only for finding or listing. |
-| "When does my car insurance renew?" | `list_deadlines` with `kind: "renewal"` | A date question. |
+| "When does my car insurance renew?" | `list_deadlines` with `kind: "renewal"`, `query: "car insurance"` | A date question about one item. |
 
 ## Voice rules
 

@@ -3,6 +3,7 @@
 import { useState } from "react";
 import type { CSSProperties, ReactNode } from "react";
 import { daysBetween, formatMoney, formatSpokenDate, formatUnitPrice, perUnit } from "@/lib/dates";
+import { capitalizeFirst } from "@/lib/speech";
 import { useCountUp } from "./hooks";
 import styles from "./echo.module.css";
 
@@ -134,6 +135,21 @@ const enterStyle = (index: number) => ({ "--delay": `${delayFor(index)}ms` }) as
 
 const label = (value: string) => value.replace(/_/g, " ");
 
+// Words joined by hyphens: "1-800-555-0142", "BW-4471-2209", "3rd-grade".
+const HYPHENATED = /([A-Za-z0-9]+(?:-[A-Za-z0-9]+)+)/;
+
+// Text where phone, reference and account numbers never break across lines at a hyphen.
+// Only the display changes: copied text stays the same.
+export function NoBreak({ text }: { text: string }) {
+  return (
+    <>
+      {text
+        .split(HYPHENATED)
+        .map((part, i) => (i % 2 === 1 && /\d/.test(part) ? <span key={i} className={styles.nowrap}>{part}</span> : part))}
+    </>
+  );
+}
+
 function CountUp({ value, delay, format }: { value: number; delay: number; format: (n: number) => string }) {
   return <>{format(useCountUp(value, delay))}</>;
 }
@@ -168,7 +184,8 @@ export function DeadlineRow({ item, index, compact = false }: { item: DeadlineIt
     <div className={`${styles.card} ${styles.deadlineRow} ${compact ? styles.compact : ""} ${styles.enter}`} style={enterStyle(index)}>
       <DateBlock iso={item.date} />
       <div className={styles.deadlineText}>
-        <div className={styles.deadlineTitle}>{item.description}</div>
+        {/* "fridge warranty ends" (built from a product name) starts with a capital letter. */}
+        <div className={styles.deadlineTitle}>{capitalizeFirst(item.description)}</div>
         <div className={styles.deadlineIssuer}>{item.issuer}</div>
       </div>
       <div className={styles.deadlineMeta}>
@@ -185,12 +202,33 @@ export function DeadlineRow({ item, index, compact = false }: { item: DeadlineIt
 
 const VISIBLE_DEADLINES = 5;
 
+const KIND_PLURALS: Record<string, string> = {
+  payment_due: "payments",
+  renewal: "renewals",
+  reply_by: "reply-by dates",
+  warranty_ends: "warranty end dates",
+  appointment: "appointments",
+};
+
 export function DeadlinesCard({ data }: { data: Record<string, unknown> }) {
   const deadlines = (data.deadlines as DeadlineItem[] | undefined) ?? [];
+  // The item asked for has no deadline: say so above the list of other upcoming ones.
+  const missing =
+    typeof data.query === "string" && data.found === false
+      ? `No match for “${data.query}” · upcoming ${KIND_PLURALS[String(data.kind)] ?? (data.payable ? "payments" : "deadlines")}`
+      : undefined;
+  const note = missing && (
+    <div className={`${styles.eyebrow} ${styles.enter}`} style={enterStyle(0)}>
+      {missing}
+    </div>
+  );
   if (deadlines.length === 0) {
     return (
-      <div className={`${styles.card} ${styles.emptyCard} ${styles.enter}`} style={enterStyle(0)}>
-        Nothing due in this period. Enjoy the quiet.
+      <div className={styles.stack}>
+        {note}
+        <div className={`${styles.card} ${styles.emptyCard} ${styles.enter}`} style={enterStyle(0)}>
+          Nothing due in this period. Enjoy the quiet.
+        </div>
       </div>
     );
   }
@@ -198,6 +236,7 @@ export function DeadlinesCard({ data }: { data: Record<string, unknown> }) {
   const total = deadlines.reduce((sum, d) => sum + (d.amount ?? 0), 0);
   return (
     <div className={styles.stack}>
+      {note}
       {visible.map((item, i) => (
         <DeadlineRow key={`${item.date}-${item.description}`} item={item} index={i} />
       ))}
@@ -242,7 +281,9 @@ export function DocumentCard({ data }: { data: Record<string, unknown> }) {
         <span className={styles.paperTag}>{label(doc.type)}</span>
       </div>
       <h3 className={styles.paperTitle}>{doc.title}</h3>
-      <p className={styles.paperSub}>{doc.summary}</p>
+      <p className={styles.paperSub}>
+        <NoBreak text={doc.summary} />
+      </p>
       <div className={styles.fieldGrid}>
         <Field name="Issuer">{doc.issuer}</Field>
         <Field name="Amount">
@@ -266,7 +307,9 @@ export function DocumentCard({ data }: { data: Record<string, unknown> }) {
       {doc.actionItems.length > 0 && (
         <ul className={styles.actionList}>
           {doc.actionItems.slice(0, 3).map((item) => (
-            <li key={item}>{item}</li>
+            <li key={item}>
+              <NoBreak text={item} />
+            </li>
           ))}
         </ul>
       )}
@@ -333,7 +376,9 @@ export function WarrantyCard({ data }: { data: Record<string, unknown> }) {
           <div className={styles.eyebrow}>How to claim</div>
           <ul className={styles.claimList}>
             {warranty.howToClaim.slice(0, 3).map((step) => (
-              <li key={step}>{step}</li>
+              <li key={step}>
+                <NoBreak text={step} />
+              </li>
             ))}
           </ul>
         </div>
@@ -342,7 +387,10 @@ export function WarrantyCard({ data }: { data: Record<string, unknown> }) {
   );
 }
 
-// Every warranty on file: product, status, end date and how much of it is used.
+const VISIBLE_WARRANTIES = 4;
+
+// Every warranty on file (the first 4, then "+N more"): product, status, end date and how much
+// of it is used.
 function WarrantyList({ warranties }: { warranties: WarrantyInfo[] }) {
   if (warranties.length === 0) {
     return (
@@ -351,9 +399,10 @@ function WarrantyList({ warranties }: { warranties: WarrantyInfo[] }) {
       </div>
     );
   }
+  const visible = warranties.slice(0, VISIBLE_WARRANTIES);
   return (
     <div className={styles.stack}>
-      {warranties.map((warranty, i) => (
+      {visible.map((warranty, i) => (
         <div key={warranty.documentId} className={`${styles.card} ${styles.warrantyRow} ${styles.enter}`} style={enterStyle(i)}>
           <div className={styles.warrantyRowHead}>
             <div>
@@ -374,6 +423,11 @@ function WarrantyList({ warranties }: { warranties: WarrantyInfo[] }) {
           </div>
         </div>
       ))}
+      {warranties.length > visible.length && (
+        <div className={`${styles.listFooter} ${styles.enter}`} style={enterStyle(visible.length)}>
+          <span>+{warranties.length - visible.length} more</span>
+        </div>
+      )}
     </div>
   );
 }
@@ -411,7 +465,9 @@ export function DraftCard({
       <div className={styles.letterSubject}>
         <b>Subject</b> {draft.subject}
       </div>
-      <div className={styles.letterBody}>{draft.body}</div>
+      <div className={styles.letterBody}>
+        <NoBreak text={draft.body} />
+      </div>
       <div className={styles.letterActions}>
         <button type="button" className={styles.paperButton} onClick={copy}>
           {copied ? <CheckIcon /> : <CopyIcon />} {copied ? "Copied" : "Copy"}
@@ -445,7 +501,9 @@ export function ExplanationCard({ data }: { data: Record<string, unknown> }) {
       {sections.map(([title, text], i) => (
         <div key={title} className={`${styles.explainSection} ${styles.enter}`} style={enterStyle(i + 1)}>
           <span className={styles.fieldName}>{title}</span>
-          <p>{text}</p>
+          <p>
+            <NoBreak text={text} />
+          </p>
         </div>
       ))}
       {info.disclaimer && <p className={styles.disclaimer}>{info.disclaimer}</p>}

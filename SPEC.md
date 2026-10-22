@@ -23,7 +23,7 @@ Primary user: an adult who manages a household (bills, insurance, kids' school, 
 | S3 | "What does this letter mean? What happens if I ignore it?" | Plain-language explanation, consequences, recommended next step. |
 | S4 | "Is my dishwasher still under warranty?" | Finds the warranty, days remaining, how to claim. |
 | S5 | "Write a reply asking for a payment extension." | Drafts a short, polite letter/email referencing the document. |
-| S6 | "When does the car insurance renew?" | Answers from stored documents (search). |
+| S6 | "When does the car insurance renew?" | Answers from stored documents (`list_deadlines` with `query`), about that item only. |
 
 Out of scope for the hackathon: real payments, multi-user accounts, OAuth, email inbox scanning, legal advice (Duly explains; it does not give legal advice and says so when relevant).
 
@@ -41,7 +41,8 @@ Out of scope for the hackathon: real payments, multi-user accounts, OAuth, email
    - Behavior: send to the LLM with a strict JSON extraction prompt → validate with zod → store the original file in S3 (only when a file was sent) and the record in DynamoDB with an internal 24-hour expiry (`expiresAt`, see section 5).
    - Output: the stored `Document` + spoken summary ("Saved: Brightwave Energy bill, $84.20 due November 14.").
 2. `list_deadlines`
-   - Input: `{ from?: ISODate, to?: ISODate, kind?: DeadlineKind, payable?: boolean }` (default: today → `from` + 30 days). `payable: true` returns every deadline with an amount to pay (bills, renewals, fees), not only `payment_due`.
+   - Input: `{ from?: ISODate, to?: ISODate, kind?: DeadlineKind, payable?: boolean, query?: string }` (default: today → `from` + 30 days). `payable: true` returns every deadline with an amount to pay (bills, renewals, fees), not only `payment_due`.
+   - `query` names one item or company ("car insurance", "PeakFit"). Every word of it that names the item (question words like "when", "due", "renew", "my stuff" are ignored; with none left there is no filter) must be in the document's title, issuer, product, type, summary or deadline descriptions, case-insensitive, with singular/plural, prefixes of 4+ letters, a few synonyms ("auto" = "car") and split words ("dish washer"). With `query` and no `to`, it looks ahead 10 years; if the item has no deadline of `kind`, its other deadlines are used. If nothing matches, it says so ("I couldn't find a renewal for home insurance.") and lists the upcoming deadlines of that kind (`found: false`); it never answers about another item as if it were the one asked for.
    - Output: deadlines sorted ascending, each with document title, issuer, amount, days left.
 3. `explain_document`
    - Input: `{ document_id?: string, query?: string, issuer?: string, question?: string }` (find by id, keywords or sender; no need to search first).
@@ -52,7 +53,8 @@ Out of scope for the hackathon: real payments, multi-user accounts, OAuth, email
 5. `draft_reply`
    - Input: `{ document_id?: string, query?: string, issuer?: string, intent: string, tone?: "polite"|"firm" }` (default tone: polite).
    - Output: subject + body draft referencing the document's numbers and dates.
-   - Dispute intent ("dispute", "contest"): the letter says plainly "I dispute ..." with the bill's amount and date, and asks for a review, a correction if needed and an itemized breakdown. It never gives reasons, no legal claims.
+   - Tones: polite is courteous ("I would like to ...", "Could you please ...", thanks them); firm is direct (the request in the first sentence, the amount and date from the document, a written response by a stated date, today + 7 days) without softeners, threats or legal claims.
+   - Dispute intent ("dispute", "contest"): the letter says it disputes the bill with its amount and date (polite "I would like to dispute ...", firm "I dispute ..."), and asks for a review, a correction if needed and an itemized breakdown. It never gives reasons, no legal claims. Only a dispute asks for an itemized breakdown (never a payment extension).
 6. `search_documents` (helper)
    - Input: `{ query: string }`. Output: top matches (id, title, issuer, type).
 7. `compare_bills`
@@ -63,7 +65,9 @@ Out of scope for the hackathon: real payments, multi-user accounts, OAuth, email
    - Input: `{ days?: number }` (default 7, max 60).
    - Output: deadlines in the period with amounts, renewals that can still be cancelled, warranties ending within 60 days, and latest bills at least 15% above the average of the earlier ones that still have an open deadline. Spoken: max 3 sentences, most urgent first. No LLM.
 
-When an issuer has several bills, document lookups (search, explain, draft) always prefer the latest one (by issue date, else creation date).
+When an issuer has several bills, document lookups (search, explain, draft) always prefer the latest one (by issue date, else creation date), unless the request names the month of an earlier bill ("my September Brightwave bill").
+
+Lookups never answer about a different item: `check_warranty` needs every word that names the product to match (same rule as `list_deadlines` `query`), and explain/draft skip any document that lacks a kind of item the request names right before a document noun ("home insurance", "phone bill", "fridge warranty"; "fine" never counts, it is also an adjective). With no document left they say so ("I couldn't find any document about home insurance.").
 
 ## 5. Data model
 

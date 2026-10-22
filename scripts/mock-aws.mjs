@@ -159,7 +159,7 @@ function structuredAnswer(body) {
       };
     }
     const body = firm
-      ? `I am requesting to ${goal} regarding ${doc.title}${refText}.${facts}\n\nPlease review the account and send me an itemized breakdown of the amount.\n\nPlease confirm in writing by ${replyBy}.`
+      ? `I am requesting to ${goal} regarding ${doc.title}${refText}.${facts}\n\nPlease confirm in writing by ${replyBy}.`
       : `I am writing about ${doc.title}${refText}.${facts}\n\nI would like to ${goal}. I would be grateful for any options you can offer.\n\nThank you for your understanding.`;
     return { subject: `${firm ? "Formal request" : "Request"}: ${goal} – ${doc.title}`, body };
   }

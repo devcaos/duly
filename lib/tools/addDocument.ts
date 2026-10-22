@@ -3,11 +3,11 @@ import { getLlm } from "@/lib/llm";
 import type { FileMimeType } from "@/lib/llm";
 import { getStorage, HOUSEHOLD_ID } from "@/lib/storage";
 import { uploadExpiresAt } from "@/lib/storage/merge";
-import { formatMoney, formatSpokenDate, todayISO } from "@/lib/dates";
+import { formatMoney, formatSpokenDate, plainDollars, todayISO } from "@/lib/dates";
 import { decodeFile } from "@/lib/files";
 import { documentSchema, isoDateSchema as isoDate } from "@/lib/schemas";
 import { DEADLINE_KINDS, DOC_TYPES } from "@/lib/types";
-import type { Document, ToolResult } from "@/lib/types";
+import type { Deadline, Document, ToolResult } from "@/lib/types";
 import { ToolError } from "./resolveDocument";
 
 // What the LLM must return. Validated with zod before anything is stored.
@@ -84,6 +84,10 @@ export async function runAddDocument(input: {
 
   const document: Document = {
     ...extracted,
+    // "$45 USD" → "$45" in what the cards show.
+    summary: plainDollars(extracted.summary),
+    actionItems: extracted.actionItems.map(plainDollars),
+    deadlines: extracted.deadlines.map((d) => ({ ...d, description: plainDollars(d.description) })),
     id,
     householdId: HOUSEHOLD_ID,
     rawText: input.text ?? extracted.rawText,
@@ -97,13 +101,37 @@ export async function runAddDocument(input: {
 }
 
 // "Saved: Brightwave Energy bill, $84.20 due November 14." ("Duly noted." is added after it.)
-function savedSentence(doc: Document): string {
-  const kind = doc.type.replace("_", " ");
+export function savedSentence(doc: Document): string {
+  const kind = doc.type === "other" ? "document" : doc.type.replace("_", " ");
+  // "Maplewood Elementary School school": the issuer already says what it is.
+  const name = new RegExp(`\\b${kind}\\b`, "i").test(doc.issuer) ? doc.issuer : `${doc.issuer} ${kind}`;
   const next = [...doc.deadlines].sort((a, b) => a.date.localeCompare(b.date)).find((d) => d.date >= todayISO());
-  if (!next) return `Saved: ${doc.issuer} ${kind}. I didn't find any upcoming deadline.`;
+  if (!next) return `Saved: ${name}. I didn't find any upcoming deadline.`;
 
-  const amount = next.amount ?? doc.amount;
-  const money = amount !== undefined ? `${formatMoney(amount, next.currency ?? doc.currency)} ` : "";
-  const when = next.kind === "payment_due" ? "due" : `${next.kind.replace("_", " ")} on`;
-  return `Saved: ${doc.issuer} ${kind}, ${money}${when} ${formatSpokenDate(next.date)}.`;
+  return `Saved: ${name}, ${nextDeadlinePhrase(doc, next)}.`;
+}
+
+// "$84.20 due November 14", "renews on November 7 at $612.00", "reply by October 27, $15.00 to pay".
+// Amounts only for money to pay: a payment (or the document's amount for it), or a deadline that
+// carries its own amount (a renewal price, a fee). Never for warranty ends or appointments.
+function nextDeadlinePhrase(doc: Document, next: Deadline): string {
+  const date = formatSpokenDate(next.date);
+  const currency = next.currency ?? doc.currency;
+  const own = next.amount !== undefined ? formatMoney(next.amount, currency) : undefined;
+  switch (next.kind) {
+    case "payment_due": {
+      const amount = next.amount ?? doc.amount;
+      return `${amount !== undefined ? `${formatMoney(amount, currency)} ` : ""}due ${date}`;
+    }
+    case "renewal":
+      return `renews on ${date}${own ? ` at ${own}` : ""}`;
+    case "reply_by":
+      return `reply by ${date}${own ? `, ${own} to pay` : ""}`;
+    case "warranty_ends":
+      return `${doc.type === "warranty" ? "it ends" : "warranty ends"} on ${date}`;
+    case "appointment":
+      return `appointment on ${date}`;
+    case "other":
+      return `next deadline on ${date}${own ? `, ${own} to pay` : ""}`;
+  }
 }

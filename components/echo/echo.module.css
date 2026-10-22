@@ -894,6 +894,11 @@
   text-transform: capitalize;
 }
 
+/* Phone and reference numbers stay on one line ("1-800-555-0142"). */
+.nowrap {
+  white-space: nowrap;
+}
+
 .claimList {
   list-style: none;
 }
