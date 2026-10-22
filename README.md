@@ -69,11 +69,11 @@ flowchart LR
 | Tool | What it does | Example question | LLM |
 |---|---|---|---|
 | `add_document` | Saves a bill, letter, warranty... from text or a photo/PDF (base64, max 3 MB) and extracts type, issuer, amounts, deadlines and action items. | "Save this letter." | yes |
-| `list_deadlines` | Upcoming deadlines sorted by date, with amounts and days left (default: next 30 days). `payable: true` returns everything with an amount to pay. | "What do I need to pay this month?" | no |
+| `list_deadlines` | Upcoming deadlines sorted by date, with amounts and days left (default: next 30 days). `payable: true` returns everything with an amount to pay; `query` answers about one item and says so if it isn't on file. | "What do I need to pay this month?", "When does the car insurance renew?" | no |
 | `explain_document` | Plain-language explanation, what happens if it's ignored and the recommended next step. Finds the document itself from keywords or the sender. | "What happens if I ignore the parking notice?" | yes |
 | `check_warranty` | One product's warranty (end date, days left, how to claim), or every warranty with its status: active, expiring soon or expired. | "Is my dishwasher still under warranty?" | no |
 | `draft_reply` | Short letter or email replying to a document, using its real numbers and dates (tone `polite` or `firm`). | "Ask Brightwave Energy for a payment extension." | yes |
-| `search_documents` | Finds stored documents by keywords (id, title, issuer, type). | "When does the car insurance renew?" | no |
+| `search_documents` | Finds stored documents by keywords (id, title, issuer, type). | "Find my car insurance documents." | no |
 | `compare_bills` | Latest bill from a company vs the previous one and vs the usual (average) amount, with percentages. When the bills store usage in the same unit (kWh, gallons), it also tells "you used more" apart from "the price per unit went up". Only states the numbers, never a reason. | "Is my electricity bill higher than usual?" | no |
 | `weekly_brief` | The next 7 days (or `days`), most urgent first: deadlines with amounts, renewals you can still cancel, warranties ending within 60 days and bills at least 15% above usual. | "Give me my weekly brief." | no |
 

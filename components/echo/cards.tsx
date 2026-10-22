@@ -185,12 +185,33 @@ export function DeadlineRow({ item, index, compact = false }: { item: DeadlineIt
 
 const VISIBLE_DEADLINES = 5;
 
+const KIND_PLURALS: Record<string, string> = {
+  payment_due: "payments",
+  renewal: "renewals",
+  reply_by: "reply-by dates",
+  warranty_ends: "warranty end dates",
+  appointment: "appointments",
+};
+
 export function DeadlinesCard({ data }: { data: Record<string, unknown> }) {
   const deadlines = (data.deadlines as DeadlineItem[] | undefined) ?? [];
+  // The item asked for has no deadline: say so above the list of other upcoming ones.
+  const missing =
+    typeof data.query === "string" && data.found === false
+      ? `No match for “${data.query}” · upcoming ${KIND_PLURALS[String(data.kind)] ?? (data.payable ? "payments" : "deadlines")}`
+      : undefined;
+  const note = missing && (
+    <div className={`${styles.eyebrow} ${styles.enter}`} style={enterStyle(0)}>
+      {missing}
+    </div>
+  );
   if (deadlines.length === 0) {
     return (
-      <div className={`${styles.card} ${styles.emptyCard} ${styles.enter}`} style={enterStyle(0)}>
-        Nothing due in this period. Enjoy the quiet.
+      <div className={styles.stack}>
+        {note}
+        <div className={`${styles.card} ${styles.emptyCard} ${styles.enter}`} style={enterStyle(0)}>
+          Nothing due in this period. Enjoy the quiet.
+        </div>
       </div>
     );
   }
@@ -198,6 +219,7 @@ export function DeadlinesCard({ data }: { data: Record<string, unknown> }) {
   const total = deadlines.reduce((sum, d) => sum + (d.amount ?? 0), 0);
   return (
     <div className={styles.stack}>
+      {note}
       {visible.map((item, i) => (
         <DeadlineRow key={`${item.date}-${item.description}`} item={item} index={i} />
       ))}

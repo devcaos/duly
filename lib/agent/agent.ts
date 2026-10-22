@@ -12,6 +12,7 @@ import type {
 import type { Tool as McpTool } from "@modelcontextprotocol/client";
 import { bedrockModelId, createBedrockClient, toLlmError } from "@/lib/llm/bedrock";
 import { periodRange, todayISO } from "@/lib/dates";
+import { itemWords } from "@/lib/match";
 import { cleanSpoken } from "@/lib/speech";
 import { callMcpTool, listMcpTools } from "./mcpClient";
 import type { McpTarget } from "./mcpClient";
@@ -79,6 +80,22 @@ const REFINE_DRAFT = /\b(make it|firmer|more polite)\b/i;
 // The message is about paying, so list_deadlines should only return deadlines with an amount.
 const PAYING = /\b(pay|paying|owe|bills?|amount|cost)\b/i;
 
+// "When does the car insurance renew?", "when's the parking fine due?": a date question about
+// one item, which sits between "when does/is" and the verb. Only those words are taken, so the
+// rest of the message ("... and how much?") never becomes part of the item's name.
+const ITEM_DATE_QUESTION =
+  /\bwhen(?:['’]s|\s+(?:does|do|is|are|will|did))\s+(.+?)\s+(renew\w*|due|expir\w*|ends?|run out)\b/i;
+
+// The list_deadlines filter for a date question about one item: { kind: "renewal", query:
+// "car insurance" }. Empty for general questions.
+export function itemFilterFor(message: string): { query?: string; kind?: "renewal" } {
+  const match = message.match(ITEM_DATE_QUESTION);
+  // "When is my next payment due?" names no item (see itemWords).
+  const words = match ? itemWords(match[1]) : [];
+  if (!match || words.length === 0) return {};
+  return { query: words.join(" "), ...(/^renew/i.test(match[2]) ? { kind: "renewal" as const } : {}) };
+}
+
 // Said when the model picks no tool (small talk, unrelated questions).
 const HELP_REPLY =
   "I can tell you what's due, give you a weekly brief, compare your bills, explain a letter, check a warranty or draft a reply. What do you need?";
@@ -93,6 +110,7 @@ Today is ${weekday}, ${today}.
 Rules:
 - Answer every paperwork question by calling exactly one tool. Your own text is never shown or spoken.
 - "What do I need to pay?", "what bills are due?": call list_deadlines with payable: true.
+- A date question about one item ("When does the car insurance renew?", "when is the parking fine due?"): call list_deadlines with "query" naming the item (e.g. "car insurance") and kind "renewal" if it asks when something renews. Leave query out for general questions ("what's due this week?").
 - Periods for list_deadlines: "this month" = from ${month.from} to ${month.to}; "this week" = from ${week.from} to ${week.to}. With no period, leave from and to out (next 30 days).
 - "Explain the ... letter", "what does it mean?", "what happens if I ignore it?": call explain_document with keywords in "query" (or the sender in "issuer"). Never call search_documents for this.
 - "Is my <product> under warranty?": check_warranty with product. "Which warranties are still active?", "my warranties": check_warranty without product.
@@ -140,7 +158,7 @@ export async function runAgent(mcpUrl: McpTarget, message: string, history: Chat
       notes.push(`unknown tool ${use.name}`);
       continue;
     }
-    const input = (use.input ?? {}) as Record<string, unknown>;
+    const input = withItemFilter(use.name, (use.input ?? {}) as Record<string, unknown>, message);
     const call = await safeCallTool(mcpUrl, use.name, input);
     if (isInputRejected(call)) {
       // Logged and skipped: the fallback below calls the tool with arguments that are valid.
@@ -226,7 +244,8 @@ function defaultInput(tool: string, message: string, history: ChatTurn[]): Recor
           ? periodRange("month")
           : {};
       // Only questions about paying get the payable filter; "what's due this week?" lists everything.
-      return PAYING.test(message) ? { payable: true, ...period } : period;
+      // A question about one item gets its filter ("when does the car insurance renew?").
+      return { ...(PAYING.test(message) ? { payable: true } : {}), ...period, ...itemFilterFor(message) };
     }
     case "explain_document": {
       const documentId = FOLLOW_UP.test(message) ? earlierTools.findLast((t) => t.documentId)?.documentId : undefined;
@@ -249,6 +268,15 @@ function defaultInput(tool: string, message: string, history: ChatTurn[]): Recor
     default:
       return {};
   }
+}
+
+// Safety net: a date question about one item must reach list_deadlines with its filter, or the
+// answer would be about the nearest deadline of another item. Nova sometimes leaves it out.
+function withItemFilter(tool: string, input: Record<string, unknown>, message: string): Record<string, unknown> {
+  if (tool !== "list_deadlines" || input.query) return input;
+  const filter = itemFilterFor(message);
+  if (!filter.query) return input;
+  return { ...input, query: filter.query, ...(input.kind || !filter.kind ? {} : { kind: filter.kind }) };
 }
 
 // The MCP server answers invalid arguments with an error result, not a protocol error.

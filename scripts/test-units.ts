@@ -3,7 +3,8 @@
 // Usage: npm run test:unit   (exit code 1 on the first failed check)
 
 import assert from "node:assert/strict";
-import { keywordToolFor } from "../lib/agent/agent";
+import { itemFilterFor, keywordToolFor } from "../lib/agent/agent";
+import { itemWords, matchesItem } from "../lib/match";
 import { canSendToken } from "../lib/agent/mcpClient";
 import { addDays, periodRange, todayISO } from "../lib/dates";
 import { forbiddenHostResponse } from "../lib/hosts";
@@ -225,6 +226,44 @@ check('keyword fallback: "summarize my insurance letter" is an explanation, not 
   assert.notEqual(keywordToolFor("Can you summarize my insurance letter?"), "weekly_brief");
   assert.equal(keywordToolFor("Can you summarize my insurance letter?"), "explain_document");
   assert.equal(keywordToolFor("Give me a summary of this letter."), "explain_document");
+});
+
+// Questions about one item, and general questions that must stay unfiltered.
+const GENERAL_DATE_QUESTIONS = [
+  "When is my next payment due?",
+  "What renews soon?",
+  "When does my stuff expire?",
+  "What do I need to pay this month?",
+  "What's due this week?",
+  "When are my bills due?",
+  "When does anything renew?",
+];
+
+check("item filter: the car insurance chip names the item, general questions name none", () => {
+  assert.equal(keywordToolFor("When does the car insurance renew?"), "list_deadlines");
+  assert.deepEqual(itemFilterFor("When does the car insurance renew?"), { query: "car insurance", kind: "renewal" });
+  assert.deepEqual(itemFilterFor("when's the parking fine due?"), { query: "parking fine" });
+  // The rest of the message never becomes part of the item's name.
+  assert.deepEqual(itemFilterFor("When is my Brightwave bill due and how much is it?"), { query: "brightwave" });
+  for (const message of GENERAL_DATE_QUESTIONS) {
+    assert.deepEqual(itemFilterFor(message), {}, message);
+    assert.deepEqual(itemWords(message), [], message);
+  }
+});
+
+check("item match: every item word must be in the document, with simple variations", () => {
+  const seed = buildSeedDocuments(todayISO());
+  const ids = (query: string) => seed.filter((doc) => matchesItem(doc, query)).map((doc) => doc.id);
+  for (const query of ["car insurance", "Car Insurance", "auto insurance policy", "Northpoint", "vehicle insurance"]) {
+    assert.deepEqual(ids(query), ["doc-northpoint-car-insurance"], query);
+  }
+  assert.deepEqual(ids("home insurance"), []);
+  assert.deepEqual(ids("coffee machine"), []);
+  assert.deepEqual(ids("gym membership"), ["doc-peakfit-renewal"]);
+  assert.deepEqual(ids("dish washer"), ["doc-homehub-dishwasher"]);
+  assert.deepEqual(ids("refrigerator"), ["doc-frostline-fridge"]);
+  // "car" is a whole word: it never matches "card" or "cards".
+  assert.equal(matchesItem({ ...seed[4], summary: "We charge the card on file." }, "car"), false);
 });
 
 // A fake bill for the threshold checks.
@@ -751,6 +790,73 @@ async function storageChecks() {
     assert.equal(hasPrev(next30.structuredContent.deadlines.map((d) => d.documentId)), false);
     // Warranty ends carry no amount, so they are never counted as payments.
     assert.equal(month.structuredContent.deadlines.some((d) => d.kind === "warranty_ends"), false);
+  });
+
+  await checkAsync("list_deadlines query: the car insurance renewal, never the gym's", async () => {
+    const { text, structuredContent } = await runListDeadlines({ kind: "renewal", query: "car insurance" });
+    assert.deepEqual(
+      structuredContent.deadlines.map((d) => d.documentId),
+      ["doc-northpoint-car-insurance"],
+    );
+    assert.equal(structuredContent.found, true);
+    assert.match(text, /^Northpoint Mutual: car insurance policy renews automatically on .+, in 21 days, for \$612\.00\.$/);
+    assert.doesNotMatch(text, /PeakFit/);
+    // The chip's filter, as the agent builds it, gives the same answer.
+    const chip = await runListDeadlines(itemFilterFor("When does the car insurance renew?"));
+    assert.equal(chip.text, text);
+    // Kind payment_due for a renewal: still the car insurance, not another payment.
+    const due = await runListDeadlines({ kind: "payment_due", query: "auto insurance policy" });
+    assert.deepEqual(
+      due.structuredContent.deadlines.map((d) => d.documentId),
+      ["doc-northpoint-car-insurance"],
+    );
+  });
+
+  await checkAsync("list_deadlines query: an item that isn't on file says so, then lists that kind", async () => {
+    const { text, structuredContent } = await runListDeadlines({ kind: "renewal", query: "home insurance" });
+    assert.equal(structuredContent.found, false);
+    assert.match(text, /^I couldn't find a renewal for home insurance\. Upcoming renewals: PeakFit on .+, and Northpoint Mutual on .+\.$/);
+    assert.deepEqual(
+      structuredContent.deadlines.map((d) => d.issuer),
+      ["PeakFit", "Northpoint Mutual"],
+    );
+    // An item on file without an upcoming deadline: the washing machine warranty ended last month.
+    const washer = await runListDeadlines({ query: "washing machine" });
+    assert.equal(washer.structuredContent.found, false);
+    assert.match(washer.text, /^I found your washing machine, but it has no upcoming deadline\. Upcoming deadlines: /);
+  });
+
+  await checkAsync("list_deadlines: general questions get no filter and the normal list", async () => {
+    const plain = await runListDeadlines({});
+    for (const message of GENERAL_DATE_QUESTIONS) {
+      const result = await runListDeadlines(itemFilterFor(message));
+      assert.equal(result.text, plain.text, message);
+    }
+    // A query that names no item is no filter.
+    assert.equal((await runListDeadlines({ query: "my bills" })).text, plain.text);
+    assert.equal((await runListDeadlines({ query: "stuff" })).text, plain.text);
+    assert.doesNotMatch(plain.text, /couldn't find/);
+  });
+
+  await checkAsync("list_deadlines: a natural question about each seed item returns that item", async () => {
+    const questions: [string, string][] = [
+      ["When is the electricity bill due?", "doc-brightwave-bill"],
+      ["When does the car insurance renew?", "doc-northpoint-car-insurance"],
+      ["When does the dishwasher warranty end?", "doc-homehub-dishwasher"],
+      ["When is the parking ticket due?", "doc-maplewood-parking"],
+      ["When does the gym membership renew?", "doc-peakfit-renewal"],
+      ["When is the field trip form due?", "doc-maplewood-field-trip"],
+      ["When does the TV warranty end?", "doc-visionmax-tv"],
+      ["When does the fridge warranty expire?", "doc-frostline-fridge"],
+      ["When does the laptop warranty end?", "doc-pinewood-laptop"],
+    ];
+    for (const [message, id] of questions) {
+      const { structuredContent, text } = await runListDeadlines(itemFilterFor(message));
+      assert.equal(structuredContent.found, true, message);
+      assert.equal(structuredContent.deadlines[0].documentId, id, message);
+      assert.ok(structuredContent.deadlines.every((d) => d.documentId === id), message);
+      assert.doesNotMatch(text, /couldn't find/, message);
+    }
   });
 
   await checkAsync('check_warranty says "expired" and "expiring soon" clearly', async () => {

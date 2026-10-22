@@ -23,7 +23,7 @@ Primary user: an adult who manages a household (bills, insurance, kids' school, 
 | S3 | "What does this letter mean? What happens if I ignore it?" | Plain-language explanation, consequences, recommended next step. |
 | S4 | "Is my dishwasher still under warranty?" | Finds the warranty, days remaining, how to claim. |
 | S5 | "Write a reply asking for a payment extension." | Drafts a short, polite letter/email referencing the document. |
-| S6 | "When does the car insurance renew?" | Answers from stored documents (search). |
+| S6 | "When does the car insurance renew?" | Answers from stored documents (`list_deadlines` with `query`), about that item only. |
 
 Out of scope for the hackathon: real payments, multi-user accounts, OAuth, email inbox scanning, legal advice (Duly explains; it does not give legal advice and says so when relevant).
 
@@ -41,7 +41,8 @@ Out of scope for the hackathon: real payments, multi-user accounts, OAuth, email
    - Behavior: send to the LLM with a strict JSON extraction prompt → validate with zod → store the original file in S3 (only when a file was sent) and the record in DynamoDB with an internal 24-hour expiry (`expiresAt`, see section 5).
    - Output: the stored `Document` + spoken summary ("Saved: Brightwave Energy bill, $84.20 due November 14.").
 2. `list_deadlines`
-   - Input: `{ from?: ISODate, to?: ISODate, kind?: DeadlineKind, payable?: boolean }` (default: today → `from` + 30 days). `payable: true` returns every deadline with an amount to pay (bills, renewals, fees), not only `payment_due`.
+   - Input: `{ from?: ISODate, to?: ISODate, kind?: DeadlineKind, payable?: boolean, query?: string }` (default: today → `from` + 30 days). `payable: true` returns every deadline with an amount to pay (bills, renewals, fees), not only `payment_due`.
+   - `query` names one item or company ("car insurance", "PeakFit"). Every word of it that names the item (question words like "when", "due", "renew", "my stuff" are ignored; with none left there is no filter) must be in the document's title, issuer, product, type, summary or deadline descriptions, case-insensitive, with singular/plural, prefixes of 4+ letters, a few synonyms ("auto" = "car") and split words ("dish washer"). With `query` and no `to`, it looks ahead 10 years; if the item has no deadline of `kind`, its other deadlines are used. If nothing matches, it says so ("I couldn't find a renewal for home insurance.") and lists the upcoming deadlines of that kind (`found: false`); it never answers about another item as if it were the one asked for.
    - Output: deadlines sorted ascending, each with document title, issuer, amount, days left.
 3. `explain_document`
    - Input: `{ document_id?: string, query?: string, issuer?: string, question?: string }` (find by id, keywords or sender; no need to search first).

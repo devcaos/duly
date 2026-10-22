@@ -107,7 +107,7 @@ const mcpHandler = createMcpHandler(
       {
         title: "List deadlines",
         description:
-          "List upcoming household deadlines (payments, renewals, reply-by dates, warranty ends, appointments) sorted by date, with amounts and days left. Defaults to today through the next 30 days. For \"what do I need to pay?\" use payable: true: it returns every deadline with an amount (bills, renewals, fees), not only payment_due.",
+          "List upcoming household deadlines (payments, renewals, reply-by dates, warranty ends, appointments) sorted by date, with amounts and days left. Defaults to today through the next 30 days. For \"what do I need to pay?\" use payable: true: it returns every deadline with an amount (bills, renewals, fees), not only payment_due. For a question about one item (\"when does the car insurance renew?\", \"when is the parking fine due?\") set query to that item; it then looks further ahead and says so if the item isn't on file.",
         inputSchema: z.object({
           from: isoDate.optional().describe("Start date (YYYY-MM-DD). Default: today."),
           to: isoDate.optional().describe("End date (YYYY-MM-DD). Default: 30 days after `from`."),
@@ -119,6 +119,11 @@ const mcpHandler = createMcpHandler(
             .boolean()
             .optional()
             .describe("Only deadlines with an amount to pay (bills, renewals, fees). Use for 'what do I need to pay?'."),
+          query: shortText()
+            .optional()
+            .describe(
+              "One specific item or company, e.g. 'car insurance', 'PeakFit', 'parking fine'. Leave it out for general questions like 'what's due this week?'.",
+            ),
         }),
         outputSchema: listDeadlinesOutput,
         annotations: { readOnlyHint: true },
