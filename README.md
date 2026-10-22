@@ -2,7 +2,11 @@
 
 **Paperwork, duly handled.**
 
-Built for the **Alexa+ track** of the Amazon Developer Hackathon "Build, Ship, Shape" (plus the **AWS Builder** mini challenge).
+**[Demo video (2:28)](https://youtu.be/9Xjkxit_8rY)**
+
+![Duly's Echo Show-style web demo drafting a polite dispute letter to Brightwave Energy](docs/screenshot.png)
+
+Built for the **Alexa+ track** of the Amazon Developer Hackathon "Build, Ship, Shape" (plus the **AWS Builder** and **Open Source** mini challenges; the latter via [mcp-bedrock-bridge](https://github.com/devcaos/mcp-bedrock-bridge)).
 
 Duly is a remote MCP server that turns Alexa+ into a household paperwork manager. Give it a bill, a letter or a warranty and it remembers every deadline, explains the fine print in plain language and drafts replies, with short answers meant to be spoken. It runs on AWS (Amazon Bedrock, DynamoDB, S3 and Polly) and ships with fictional sample documents only.
 

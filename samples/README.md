@@ -7,7 +7,7 @@ Documents 1-6 match the seed data in `lib/storage/seed.ts` (same issuers, amount
 numbers and day offsets). Document 7 is extra, for the live upload demo. The seed also has
 eight documents without a sample file (see "Seed-only documents" below).
 
-**Generated on 2026-10-17.** The dates printed on these files are fixed: they were relative to
+**Generated on 2026-11-08.** The dates printed on these files are fixed: they were relative to
 that day. The server's sample documents are different: they are rebuilt from today's date on
 every read, so they move every day. If you upload a sample file whose printed due date has
 already passed, the saved document will not show an upcoming deadline. Regenerate the files
@@ -15,8 +15,8 @@ so the dates on paper match the seed on a given day:
 
 ```bash
 npm run samples                                              # dates relative to today
-SAMPLES_TODAY=2026-10-23 npm run samples                     # fixed base date (macOS / Linux)
-$env:SAMPLES_TODAY="2026-10-23"; npm run samples             # fixed base date (Windows PowerShell)
+SAMPLES_TODAY=2026-11-08 npm run samples                     # fixed base date (macOS / Linux)
+$env:SAMPLES_TODAY="2026-11-08"; npm run samples             # fixed base date (Windows PowerShell)
 ```
 
 The script (`scripts/generate-samples.mjs`) uses a Chromium-based browser (Chrome,
@@ -35,10 +35,10 @@ Seed document: `doc-brightwave-bill`
 | Type | bill |
 | Issuer | Brightwave Energy |
 | Account number | BW-4471-2209 |
-| Issue date | 2026-10-05 (today - 12) |
+| Issue date | 2026-10-27 (today - 12) |
 | Usage | 412 kWh |
 | Amount due | $84.20 USD |
-| Due date (payment_due) | 2026-10-26 (today + 9) |
+| Due date (payment_due) | 2026-11-17 (today + 9) |
 | Late payment fee | $10.00 |
 
 ## Northpoint Mutual car insurance renewal
@@ -51,10 +51,10 @@ Seed document: `doc-northpoint-car-insurance`
 | Type | insurance |
 | Issuer | Northpoint Mutual |
 | Policy number | NM-88213 |
-| Issue date | 2026-10-08 (today - 9) |
+| Issue date | 2026-10-30 (today - 9) |
 | Vehicle | 2019 hatchback |
 | New annual premium | $612.00 USD (previous: $548.00) |
-| Renewal date (renewal) | 2026-11-07 (today + 21), renews automatically |
+| Renewal date (renewal) | 2026-11-29 (today + 21), renews automatically |
 | Phone | 1-800-555-0142 |
 
 ## HomeHub Appliances dishwasher receipt with 2-year warranty
@@ -67,11 +67,11 @@ Seed document: `doc-homehub-dishwasher`
 | Type | warranty |
 | Issuer | HomeHub Appliances |
 | Receipt number | HH-55021 |
-| Purchase date | 2025-09-12 (today - 400) |
+| Purchase date | 2025-10-04 (today - 400) |
 | Product | QuietClean 45 dishwasher |
 | Amount | $549.99 USD |
 | Warranty | 2 years, parts and labor |
-| Warranty ends (warranty_ends) | 2027-09-12 (today + 330) |
+| Warranty ends (warranty_ends) | 2027-10-04 (today + 330) |
 | Warranty claims | 1-800-555-0177, homehub.example/warranty |
 
 ## City of Maplewood parking violation notice
@@ -84,10 +84,10 @@ Seed document: `doc-maplewood-parking`
 | Type | official_letter |
 | Issuer | City of Maplewood (Parking Services) |
 | Notice number | PK-30918 |
-| Issue date | 2026-10-14 (today - 3) |
+| Issue date | 2026-11-05 (today - 3) |
 | Violation | Parking during street cleaning |
 | Fine | $45.00 USD |
-| Pay or appeal by (payment_due) | 2026-10-29 (today + 12) |
+| Pay or appeal by (payment_due) | 2026-11-20 (today + 12) |
 | Fine after deadline | $90.00 |
 
 ## PeakFit gym membership auto-renewal reminder
@@ -100,10 +100,10 @@ Seed document: `doc-peakfit-renewal`
 | Type | subscription |
 | Issuer | PeakFit |
 | Member ID | PF-7730 |
-| Issue date | 2026-10-12 (today - 5) |
+| Issue date | 2026-11-03 (today - 5) |
 | Monthly fee | $39.99 USD |
-| Cancel by (reply_by) | 2026-10-21 (today + 4) |
-| Renewal date (renewal) | 2026-10-23 (today + 6) |
+| Cancel by (reply_by) | 2026-11-12 (today + 4) |
+| Renewal date (renewal) | 2026-11-14 (today + 6) |
 
 ## Maplewood Elementary field-trip permission form
 
@@ -114,11 +114,11 @@ Seed document: `doc-maplewood-field-trip`
 | --- | --- |
 | Type | school |
 | Issuer | Maplewood Elementary |
-| Issue date | 2026-10-15 (today - 2) |
+| Issue date | 2026-11-06 (today - 2) |
 | Event | Grade 3 field trip to the Maplewood Science Museum |
 | Fee | $15.00 USD |
-| Return form and fee by (reply_by) | 2026-10-22 (today + 5) |
-| Trip date (appointment) | 2026-11-04 (today + 18) |
+| Return form and fee by (reply_by) | 2026-11-13 (today + 5) |
+| Trip date (appointment) | 2026-11-26 (today + 18) |
 
 ## Riverside Water Company water bill (live upload demo, not in the seed)
 
@@ -130,10 +130,10 @@ Files: `07-riverside-water-bill.png`, `07-riverside-water-bill.pdf`
 | Type | bill |
 | Issuer | Riverside Water Company |
 | Account number | RW-1180-33 |
-| Issue date | 2026-10-17 (today) |
+| Issue date | 2026-11-08 (today) |
 | Usage | 4,200 gallons |
 | Amount due | $56.75 USD |
-| Due date (payment_due) | 2026-10-31 (today + 14, "pay within 14 days") |
+| Due date (payment_due) | 2026-11-22 (today + 14, "pay within 14 days") |
 | Late fee | $5.00 |
 
 ## Seed-only documents (no sample file)
