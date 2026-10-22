@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { getStorage, HOUSEHOLD_ID } from "@/lib/storage";
 import { daysBetween, describeDaysLeft, formatSpokenDate, todayISO } from "@/lib/dates";
+import { itemWords, matchesItem } from "@/lib/match";
 import { scoreDocument } from "@/lib/search";
 import { isoDateSchema } from "@/lib/schemas";
 import type { Document, ToolResult } from "@/lib/types";
@@ -49,11 +50,13 @@ export async function runCheckWarranty(input: {
   const warranties = docs.filter((doc) => warrantyEnd(doc));
 
   const product = input.product?.trim() ?? "";
-  if (GENERIC_PRODUCT.test(product)) return listAll(warranties);
+  if (GENERIC_PRODUCT.test(product) || itemWords(product).length === 0) return listAll(warranties);
 
+  // Every word that names the product must match ("coffee machine" is not the washing machine);
+  // among the matches, the best search score wins.
   const best = warranties
+    .filter((doc) => matchesItem(doc, product))
     .map((doc) => ({ doc, score: scoreDocument(doc, product) }))
-    .filter((r) => r.score > 0)
     .sort((a, b) => b.score - a.score)[0];
 
   if (!best) {

@@ -32,13 +32,32 @@ const SYNONYMS: string[][] = [
   ["membership", "subscription"],
 ];
 
+// Words that say which kind of item a document is about, when they come right before one of the
+// ITEM_NOUNS: "home insurance", "phone bill", "fridge warranty" (but not "phone number").
+// "fine" is left out: it is also an adjective ("is this letter fine?").
+const TYPE_WORDS = new Set([
+  ...SYNONYMS.flat().filter((word) => word !== "fine"),
+  ..."life health pet travel dental renters gas water dishwasher".split(" "),
+]);
+const ITEM_NOUNS = new Set(
+  (
+    "insurance policy policies bill bills warranty warranties receipt letter notice plan contract membership " +
+    "subscription coverage statement renewal invoice account service"
+  ).split(" "),
+);
+
 const synonymsOf = (word: string) => SYNONYMS.find((group) => group.includes(word)) ?? [word];
 // "renewals" matches "renewal", "bills" matches "bill".
 const singular = (word: string) => (word.length > 3 && word.endsWith("s") ? word.slice(0, -1) : word);
 
+// Lowercase words, where "auto-renewal" means automatic, not car: it never matches "car insurance".
+function words(text: string): string[] {
+  return tokenize(text.replace(/\bauto[-\s]?(renew)/gi, "$1"));
+}
+
 // The words of a question or filter that name an item (none for "when is my next payment due?").
 export function itemWords(text: string): string[] {
-  return tokenize(text).filter((word) => !FILLER.has(word));
+  return words(text).filter((word) => !FILLER.has(word));
 }
 
 function documentWords(doc: Document): Set<string> {
@@ -50,9 +69,7 @@ function documentWords(doc: Document): Set<string> {
     doc.summary,
     ...doc.deadlines.map((d) => d.description),
   ];
-  // "auto-renewal" means automatic, not car: it must not match "car insurance".
-  const text = fields.join(" ").replace(/\bauto[-\s]?(renew)/gi, "$1");
-  return new Set(tokenize(text).map(singular));
+  return new Set(words(fields.join(" ")).map(singular));
 }
 
 // Same word, a synonym or the singular. With `prefix`, words of 4+ letters also match the start
@@ -68,14 +85,24 @@ function hasWord(words: Set<string>, word: string, prefix: boolean): boolean {
 // True when every item word of `query` is in the document (also when it names no item).
 // Two words written apart can match one ("dish washer" finds "dishwasher").
 export function matchesItem(doc: Document, query: string): boolean {
-  const words = itemWords(query);
+  const item = itemWords(query);
   const fields = documentWords(doc);
-  for (let i = 0; i < words.length; i++) {
-    if (i + 1 < words.length && hasWord(fields, words[i] + words[i + 1], true)) {
+  for (let i = 0; i < item.length; i++) {
+    if (i + 1 < item.length && hasWord(fields, item[i] + item[i + 1], true)) {
       i++;
       continue;
     }
-    if (!hasWord(fields, words[i], true)) return false;
+    if (!hasWord(fields, item[i], true)) return false;
   }
   return true;
+}
+
+// Words in `text` that say which kind of item it is about and that the document doesn't have:
+// "my home insurance letter" against the car insurance gives ["home"]. Whole words only.
+export function conflictingTypeWords(doc: Document, text: string): string[] {
+  const fields = documentWords(doc);
+  const all = words(text);
+  return all.filter(
+    (word, i) => TYPE_WORDS.has(word) && ITEM_NOUNS.has(all[i + 1] ?? "") && !hasWord(fields, word, false),
+  );
 }

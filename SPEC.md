@@ -64,7 +64,9 @@ Out of scope for the hackathon: real payments, multi-user accounts, OAuth, email
    - Input: `{ days?: number }` (default 7, max 60).
    - Output: deadlines in the period with amounts, renewals that can still be cancelled, warranties ending within 60 days, and latest bills at least 15% above the average of the earlier ones that still have an open deadline. Spoken: max 3 sentences, most urgent first. No LLM.
 
-When an issuer has several bills, document lookups (search, explain, draft) always prefer the latest one (by issue date, else creation date).
+When an issuer has several bills, document lookups (search, explain, draft) always prefer the latest one (by issue date, else creation date), unless the request names the month of an earlier bill ("my September Brightwave bill").
+
+Lookups never answer about a different item: `check_warranty` needs every word that names the product to match (same rule as `list_deadlines` `query`), and explain/draft skip any document that lacks a kind of item the request names right before a document noun ("home insurance", "phone bill", "fridge warranty"; "fine" never counts, it is also an adjective). With no document left they say so ("I couldn't find any document about home insurance.").
 
 ## 5. Data model
 

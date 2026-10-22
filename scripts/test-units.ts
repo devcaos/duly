@@ -859,6 +859,77 @@ async function storageChecks() {
     }
   });
 
+  await checkAsync("check_warranty: each seed warranty by name and variations, never another product", async () => {
+    const products: [string, string][] = [
+      ["dishwasher", "doc-homehub-dishwasher"],
+      ["dish washer", "doc-homehub-dishwasher"],
+      ["dishwasher warranty", "doc-homehub-dishwasher"],
+      ["TV", "doc-visionmax-tv"],
+      ["television", "doc-visionmax-tv"],
+      ["fridge", "doc-frostline-fridge"],
+      ["refrigerator", "doc-frostline-fridge"],
+      ["washing machine", "doc-aquaspin-washer"],
+      ["washer", "doc-aquaspin-washer"],
+      ["laptop", "doc-pinewood-laptop"],
+      ["Pinewood computer", "doc-pinewood-laptop"],
+    ];
+    for (const [product, id] of products) {
+      const { structuredContent } = await runCheckWarranty({ product });
+      assert.equal(structuredContent.warranty?.documentId, id, product);
+    }
+    for (const product of ["coffee machine", "Samsung TV", "car"]) {
+      const { structuredContent, text } = await runCheckWarranty({ product });
+      assert.equal(structuredContent.found, false, product);
+      assert.equal(text, `I couldn't find a warranty for ${product}.`);
+    }
+  });
+
+  await checkAsync("document lookups: two natural phrasings find each of the 14 seed documents", async () => {
+    const seed = buildSeedDocuments(todayISO());
+    assert.equal(seed.length, 14);
+    // "September": earlier bills are named by their month.
+    const month = (id: string) => seed.find((doc) => doc.id === id)!.title.match(/, (\w+) \(SAMPLE\)/)![1];
+    const items: [string, string, string][] = [
+      ["doc-brightwave-bill", "Brightwave Energy", "electricity bill"],
+      ["doc-northpoint-car-insurance", "Northpoint Mutual", "car insurance"],
+      ["doc-homehub-dishwasher", "HomeHub Appliances", "dishwasher receipt"],
+      ["doc-maplewood-parking", "City of Maplewood", "parking notice"],
+      ["doc-peakfit-renewal", "PeakFit", "gym membership"],
+      ["doc-maplewood-field-trip", "Maplewood Elementary", "field trip form"],
+      ["doc-visionmax-tv", "VisionMax", "TV receipt"],
+      ["doc-frostline-fridge", "FrostLine", "fridge receipt"],
+      ["doc-aquaspin-washer", "AquaSpin", "washing machine receipt"],
+      ["doc-pinewood-laptop", "Pinewood Computers", "laptop receipt"],
+      ["doc-brightwave-bill-prev-1", "Brightwave Energy", `${month("doc-brightwave-bill-prev-1")} electricity bill`],
+      ["doc-brightwave-bill-prev-2", "Brightwave Energy", `${month("doc-brightwave-bill-prev-2")} electricity bill`],
+      ["doc-riverside-water-prev-1", "Riverside Water Company", `${month("doc-riverside-water-prev-1")} water bill`],
+      ["doc-riverside-water-prev-2", "Riverside Water Company", `${month("doc-riverside-water-prev-2")} water bill`],
+    ];
+    assert.deepEqual(items.map(([id]) => id).sort(), seed.map((doc) => doc.id).sort());
+    for (const [id, issuer, item] of items) {
+      for (const query of [`Explain my ${item} letter`, `Write a reply to ${issuer} about my ${item}`]) {
+        assert.equal((await resolveDocument({ query })).id, id, query);
+      }
+      // As Nova sends it: the sender in issuer, the item in query.
+      assert.equal((await resolveDocument({ issuer, query: item })).id, id, `${issuer} / ${item}`);
+    }
+    assert.equal(
+      (await resolveDocument({ query: "Write a reply to Brightwave Energy disputing my electricity bill." })).id,
+      "doc-brightwave-bill",
+    );
+  });
+
+  await checkAsync("document lookups: another kind of item is never the answer", async () => {
+    await assert.rejects(resolveDocument({ query: "Explain my home insurance letter" }), {
+      message: "I couldn't find any document about home insurance.",
+    });
+    await assert.rejects(resolveDocument({ query: "phone bill" }), /couldn't find any document about phone bill/);
+    // "fine" and "phone number" are not kinds of item: the lookup works as before.
+    assert.equal((await resolveDocument({ query: "Is this parking letter fine?" })).id, "doc-maplewood-parking");
+    assert.equal((await resolveDocument({ query: "the phone number on my dishwasher receipt" })).id, "doc-homehub-dishwasher");
+    assert.equal((await resolveDocument({ query: "Explain the parking fine letter." })).id, "doc-maplewood-parking");
+  });
+
   await checkAsync('check_warranty says "expired" and "expiring soon" clearly', async () => {
     const fridge = await runCheckWarranty({ product: "fridge" });
     assert.equal(fridge.structuredContent.warranty?.status, "expiring_soon");
