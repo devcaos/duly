@@ -6,7 +6,7 @@ import assert from "node:assert/strict";
 import { itemFilterFor, keywordToolFor } from "../lib/agent/agent";
 import { itemWords, matchesItem } from "../lib/match";
 import { canSendToken } from "../lib/agent/mcpClient";
-import { addDays, periodRange, todayISO } from "../lib/dates";
+import { addDays, formatLongDate, periodRange, todayISO } from "../lib/dates";
 import { forbiddenHostResponse } from "../lib/hosts";
 import { allowRequest, MAX_TRACKED_KEYS } from "../lib/rateLimit";
 import { searchDocuments } from "../lib/search";
@@ -23,7 +23,7 @@ import { AwsStorage, fromItem, fromStoredItem, toItem } from "../lib/storage/aws
 import { liveDocuments, mergeWithSeed, pickDocument, UPLOAD_TTL_SECONDS, uploadExpiresAt } from "../lib/storage/merge";
 import { MemoryStorage } from "../lib/storage/memory";
 import { compareIssuerBills, isNoticeablyHigher, runCompareBills, usageSentence } from "../lib/tools/compareBills";
-import { DISPUTE_RULE, findProblems, isDisputeIntent, runDraftReply, templateDraft, toPlainText } from "../lib/tools/draftReply";
+import { disputeRule, findProblems, isDisputeIntent, runDraftReply, templateDraft, toPlainText } from "../lib/tools/draftReply";
 import { runAddDocument } from "../lib/tools/addDocument";
 import { runListDeadlines } from "../lib/tools/listDeadlines";
 import { resolveDocument } from "../lib/tools/resolveDocument";
@@ -463,7 +463,7 @@ check("draft_reply: the template letter disputes the bill with its real amount a
   const firm = templateDraft(brightwave, DISPUTE, "firm", refs, replyBy);
   assert.match(firm.body, /^I dispute the \$84\.20 charge on your Brightwave Energy electricity bill \(Account number BW-4471-2209\), dated [A-Z][a-z]+ \d{1,2}, \d{4}\./);
   assert.match(firm.body, /itemized breakdown/);
-  assert.match(firm.body, /Please reply in writing by October 25, 2026\.$/);
+  assert.match(firm.body, /I expect a written response by October 25, 2026\.$/);
   assert.doesNotMatch(firm.body, /\b(error|incorrect|mistake|overcharg\w*|wrong|legal)\b/i);
   assert.equal(firm.subject, "Dispute: Brightwave Energy electricity bill (Account number BW-4471-2209)");
   // It passes the validator's dispute checks itself.
@@ -477,6 +477,47 @@ check("draft_reply: the template letter disputes the bill with its real amount a
   const extension = templateDraft(brightwave, "ask for a payment extension", "firm", refs, replyBy);
   assert.match(extension.body, /^I am writing to ask for a payment extension regarding Brightwave Energy electricity bill/);
   assert.equal(extension.subject, "Ask for a payment extension: Brightwave Energy electricity bill (Account number BW-4471-2209)");
+});
+
+check("draft_reply: an extension letter never asks for an itemized breakdown", () => {
+  const brightwave = buildSeedDocuments(todayISO()).find((doc) => doc.id === "doc-brightwave-bill")!;
+  const replyBy = "October 25, 2026";
+  for (const tone of ["polite", "firm"] as const) {
+    const draft = templateDraft(brightwave, "ask for a payment extension", tone, [], replyBy);
+    assert.doesNotMatch(draft.body, /itemi[sz]ed|breakdown/i, tone);
+    const style = { tone, replyBy, amount: 84.2 };
+    assert.deepEqual(findProblems(draft, new Set(["84.2", "2026", "25", "31"]), [], undefined, style), [], tone);
+  }
+  // A model letter that asks for one is sent back; a dispute may ask for it.
+  const asked = letter("I am requesting more time to pay the $84.20 bill. Please send an itemized breakdown.");
+  assert.ok(findProblems(asked, new Set(["84.2"]), []).some((p) => p.includes("itemized breakdown")));
+  assert.equal(findProblems(asked, new Set(["84.2"]), [], { intent: DISPUTE, amount: 84.2 }).some((p) => p.includes("itemized")), false);
+});
+
+check("draft_reply: polite asks courteously, firm is direct with the amount and a reply date", () => {
+  const brightwave = buildSeedDocuments(todayISO()).find((doc) => doc.id === "doc-brightwave-bill")!;
+  const replyBy = "October 25, 2026";
+  const polite = templateDraft(brightwave, DISPUTE, "polite", [], replyBy).body;
+  const firm = templateDraft(brightwave, DISPUTE, "firm", [], replyBy).body;
+  assert.match(polite, /^I would like to dispute .*\n\nCould you please /);
+  assert.match(firm, /^I dispute the \$84\.20 charge .*dated /);
+  assert.match(firm, /I expect a written response by October 25, 2026\./);
+  assert.doesNotMatch(firm, /kindly|I hope|grateful|if possible|sorry|I would like/i);
+  assert.notEqual(polite, firm);
+  assert.match(disputeRule("polite"), /I would like to dispute/);
+  assert.match(disputeRule("firm"), /"I dispute the \$X bill/);
+
+  const allowed = new Set(["84.2", "2026", "25"]);
+  const firmStyle = { tone: "firm" as const, replyBy, amount: 84.2 };
+  const vague = findProblems(letter("I kindly ask you to review my bill."), allowed, [], undefined, firmStyle);
+  assert.ok(vague.some((p) => p.includes(replyBy)));
+  assert.ok(vague.some((p) => p.includes("cite the amount")));
+  assert.ok(vague.some((p) => p.includes('"kindly"')));
+  const direct = letter(`I am requesting more time to pay the $84.20 bill. I expect a written response by ${replyBy}.`);
+  assert.deepEqual(findProblems(direct, allowed, [], undefined, firmStyle), []);
+  const politeStyle = { tone: "polite" as const, replyBy, amount: 84.2 };
+  assert.ok(findProblems(letter("Give me more time."), allowed, [], undefined, politeStyle).some((p) => p.includes("courteous")));
+  assert.deepEqual(findProblems(letter("Could you please give me more time?"), allowed, [], undefined, politeStyle), []);
 });
 
 check("draft_reply: HTML from the model becomes plain text", () => {
@@ -971,20 +1012,22 @@ async function storageChecks() {
     const fake: LlmAdapter = {
       async generateJson<T>({ prompt }: { prompt: string }): Promise<T> {
         prompts.push(prompt);
-        const body = prompt.includes(DISPUTE_RULE)
+        const body = prompt.includes(disputeRule("firm"))
           ? "I dispute the $84.20 bill.\n\nPlease review it and send me an itemized breakdown."
           : "I am requesting more time to pay the $84.20 bill.";
-        return { subject: "Brightwave bill", body } as T;
+        // A firm letter asks for a written response by the date in the prompt.
+        const replyBy = prompt.match(/written response by ([A-Z][a-z]+ \d{1,2}, \d{4})/)?.[1];
+        return { subject: "Brightwave bill", body: `${body}\n\nI expect a written response by ${replyBy}.` } as T;
       },
     };
     setLlmForTests(fake);
     try {
       await runDraftReply({ issuer: "Brightwave Energy", intent: "ask for a payment extension", tone: "firm" });
       assert.equal(prompts.length, 1);
-      assert.equal(prompts[0].includes(DISPUTE_RULE), false);
+      assert.equal(prompts[0].includes(disputeRule("firm")), false);
 
       const disputed = await runDraftReply({ issuer: "Brightwave Energy", intent: "dispute my electricity bill", tone: "firm" });
-      assert.ok(prompts.at(-1)!.includes(DISPUTE_RULE));
+      assert.ok(prompts.at(-1)!.includes(disputeRule("firm")));
       assert.match(disputed.structuredContent.body, /disput/i);
       assert.match(disputed.structuredContent.body, /84\.20/);
     } finally {
@@ -993,11 +1036,13 @@ async function storageChecks() {
   });
 
   await checkAsync("draft_reply with a simulated LLM: no HTML in the letter, polite or firm", async () => {
+    // The reply-by date the firm tone asks for (today + 7 days).
+    const replyBy = formatLongDate(addDays(todayISO(), 7));
     const fake: LlmAdapter = {
       async generateJson<T>(): Promise<T> {
         const body =
           "Dear Brightwave Energy,<br><br>I dispute the $84.20 bill.<br/><br/><br/>Please send an itemized breakdown.<br><br>" +
-          "Thank you for your attention to this matter.<br><br>Sincerely,<br>[Your name]";
+          `I expect a written response by ${replyBy}.<br><br>Sincerely,<br>[Your name]`;
         return { subject: "Dispute:<br> <b>electricity bill</b>", body } as T;
       },
     };
@@ -1010,7 +1055,7 @@ async function storageChecks() {
         assert.equal(
           draft.body,
           "Dear Brightwave Energy,\n\nI dispute the $84.20 bill.\n\nPlease send an itemized breakdown.\n\n" +
-            "Thank you for your attention to this matter.\n\nSincerely,\n[Your name]",
+            `I expect a written response by ${replyBy}.\n\nSincerely,\n[Your name]`,
         );
       }
     } finally {

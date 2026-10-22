@@ -56,7 +56,7 @@ An error result (`isError: true`) has one short text that is safe to say to the 
 ### draft_reply
 - **When:** "Write a reply to Brightwave Energy asking for a payment extension", "make it firmer".
 - **Inputs:** `intent` (required: what the reply should achieve), `query` / `issuer` / `document_id`, `tone` (`polite` default, or `firm`).
-- **Disputes:** keep the user's word in `intent` ("dispute my electricity bill"). The letter then says plainly that the user disputes the bill, with its amount and date, and asks for a review and an itemized breakdown, without giving reasons.
+- **Disputes:** keep the user's word in `intent` ("dispute my electricity bill"). The letter then says plainly that the user disputes the bill, with its amount and date, and asks for a review and an itemized breakdown, without giving reasons. Other letters (a payment extension, a cancellation) never ask for a breakdown. `tone: "firm"` is direct, cites the amount and asks for a written response by a date; `polite` asks courteously.
 - **Returns:** `subject` and a full `body` (greeting and sign-off included) that only uses the document's own numbers, dates and reference numbers. The spoken text never reads the letter: "Here's a polite draft to Brightwave Energy. Say "make it firmer" to change the tone."
 - **Changing the tone:** call it again with the same `document_id` and `intent` and the new `tone`.
 - **Example:** "Write a polite email to Brightwave Energy asking for a two-week payment extension." → `{ issuer: "Brightwave Energy", intent: "ask for a two-week payment extension" }`

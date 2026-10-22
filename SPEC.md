@@ -53,7 +53,8 @@ Out of scope for the hackathon: real payments, multi-user accounts, OAuth, email
 5. `draft_reply`
    - Input: `{ document_id?: string, query?: string, issuer?: string, intent: string, tone?: "polite"|"firm" }` (default tone: polite).
    - Output: subject + body draft referencing the document's numbers and dates.
-   - Dispute intent ("dispute", "contest"): the letter says plainly "I dispute ..." with the bill's amount and date, and asks for a review, a correction if needed and an itemized breakdown. It never gives reasons, no legal claims.
+   - Tones: polite is courteous ("I would like to ...", "Could you please ...", thanks them); firm is direct (the request in the first sentence, the amount and date from the document, a written response by a stated date, today + 7 days) without softeners, threats or legal claims.
+   - Dispute intent ("dispute", "contest"): the letter says it disputes the bill with its amount and date (polite "I would like to dispute ...", firm "I dispute ..."), and asks for a review, a correction if needed and an itemized breakdown. It never gives reasons, no legal claims. Only a dispute asks for an itemized breakdown (never a payment extension).
 6. `search_documents` (helper)
    - Input: `{ query: string }`. Output: top matches (id, title, issuer, type).
 7. `compare_bills`

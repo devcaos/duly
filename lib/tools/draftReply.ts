@@ -30,7 +30,8 @@ const SIGN_OFF = "Sincerely,\n[Your name]";
 const SYSTEM_PROMPT = `You write short replies (letters or emails) to companies and organizations on behalf of a household.
 Rules:
 - Use only facts, figures, dates and reference numbers that are in the document data. Never state a reason, complaint, fact or figure that isn't there, and don't propose new amounts or time periods.
-- To question a charge, ask for a review and an itemized breakdown. Never give reasons or say what is wrong with it (no "error", "incorrect", "overcharged").
+- Never give reasons or say what is wrong with a charge (no "error", "incorrect", "overcharged").
+- Ask for an itemized breakdown only when the goal is to dispute a bill, never for other requests (like a payment extension).
 - Use reference numbers exactly as listed, with the label they have (an account number is never a bill or invoice number).
 - Write dates like "October 5, 2026", never as YYYY-MM-DD.
 - body: only the paragraphs. No greeting ("Dear ...") and no sign-off ("Sincerely", your name): they are added automatically.
@@ -40,14 +41,24 @@ Rules:
 // What each tone means. Firm must read clearly different from polite, without threats.
 const TONE_RULES: Record<Tone, (replyBy: string) => string> = {
   polite: (replyBy) =>
-    `Tone: polite and warm. Courteous and appreciative; it's fine to thank them. You may ask for a reply by ${replyBy}.`,
+    `Tone: polite and courteous.
+- Ask, never demand: "I would like to ...", "Could you please ...", "I would be grateful if ...".
+- Thank them for their help before the end.
+- You may say you would appreciate a reply by ${replyBy}.`,
   firm: (replyBy) =>
-    `Tone: firm. Direct and businesslike:
-- State the request plainly in the first sentence ("I am requesting...", "I need...").
-- No apologies or softeners: never write "kindly", "I hope", "I would be grateful", "if possible", "sorry".
-- Ask for a written answer by ${replyBy}, using that exact date.
+    `Tone: firm. Direct and businesslike, still professional:
+- State the request plainly in the first sentence ("I am requesting...", "I dispute...").
+- Cite the amount and the due date from the document data.
+- Ask for a written response by ${replyBy}, using that exact date.
+- No apologies or softeners: never write "kindly", "I hope", "I would be grateful", "I would like", "if possible", "sorry".
 - Stay respectful: no threats, no legal claims, no ultimatums, no invented consequences.`,
 };
+
+// Softeners a firm letter never uses (see TONE_RULES).
+const SOFTENERS = /\b(kindly|I hope|grateful|if possible|sorry|I would like)\b/i;
+// A polite letter asks ("please", "could you", "I would like").
+const COURTEOUS = /\b(please|could you|would you|I would)\b/i;
+const BREAKDOWN = /\b(itemi[sz]ed|breakdown)\b/i;
 
 // "Dispute my electricity bill", "Write a firm letter ... disputing my bill", "contest the charge".
 const DISPUTE = /\b(disput\w*|contest\w*)\b/i;
@@ -59,10 +70,17 @@ export function isDisputeIntent(intent: string): boolean {
 }
 
 // Added to the prompt when the user disputes the bill: say it plainly, with no reasons.
-export const DISPUTE_RULE = `The goal is to dispute this bill:
-- First sentence: say plainly that I dispute it, with the amount and the bill's date from the document (e.g. "I dispute the $X bill dated <date>").
-- Then ask them to review it, correct it if needed and send an itemized breakdown.
+export function disputeRule(tone: Tone): string {
+  const opening = tone === "firm" ? "I dispute the $X bill dated <date>." : "I would like to dispute the $X bill dated <date>.";
+  const ask =
+    tone === "firm"
+      ? "Then ask them to review it, correct it if needed and send an itemized breakdown."
+      : 'Then ask courteously ("Could you please ...") for a review, a correction if needed and an itemized breakdown.';
+  return `The goal is to dispute this bill:
+- First sentence: say that I dispute it, with the amount and the bill's date from the document (e.g. "${opening}").
+- ${ask}
 - No reasons, no legal claims, no threats.`;
+}
 
 // Words that say what is wrong with the bill: a reason the user never gave.
 const ERROR_WORDS = /\b(error|errors|incorrect|mistakes?|overcharg\w*|wrong)\b/gi;
@@ -106,13 +124,15 @@ export async function runDraftReply(input: {
       : "This document has no reference numbers: don't mention any.";
   const prompt =
     `Today's date: ${formatLongDate(today)}.\n\nDocument:\n${documentForPrompt(doc)}\n\n${referenceList}\n\n` +
-    `${TONE_RULES[tone](replyBy)}\n\n${dispute ? `${DISPUTE_RULE}\n\n` : ""}` +
+    `${TONE_RULES[tone](replyBy)}\n\n${dispute ? `${disputeRule(tone)}\n\n` : ""}` +
     `Write a ${tone} reply to ${doc.issuer}. Goal: ${input.intent}`;
   // Every figure the letter may contain comes from here.
   const allowedNumbers = numbersIn(`${documentForPrompt(doc)} ${input.intent} ${replyBy} ${formatLongDate(today)}`);
 
+  const style = { tone, replyBy, amount: billAmount(doc).amount };
+
   let draft = normalize(await getLlm().generateJson({ system: SYSTEM_PROMPT, prompt, schema: draftSchema }));
-  let problems = findProblems(draft, allowedNumbers, references, dispute);
+  let problems = findProblems(draft, allowedNumbers, references, dispute, style);
   if (problems.length > 0) {
     // One retry, telling the model exactly what was wrong.
     console.warn(`[draft_reply] retrying: ${problems.length} problem(s) in the first draft`);
@@ -120,7 +140,7 @@ export async function runDraftReply(input: {
     draft = normalize(
       await getLlm().generateJson({ system: SYSTEM_PROMPT, prompt: `${prompt}\n\n${feedback}`, schema: draftSchema }),
     );
-    problems = findProblems(draft, allowedNumbers, references, dispute);
+    problems = findProblems(draft, allowedNumbers, references, dispute, style);
   }
   if (problems.length > 0) {
     // Still wrong: send a plain letter built only from the document data instead.
@@ -195,12 +215,15 @@ function numbersIn(text: string): Set<string> {
 }
 
 // Objective checks only: figures that aren't in the data, reference numbers written with the
-// wrong label and, for a dispute, that it says so with the bill's amount and gives no reason.
+// wrong label, for a dispute that it says so with the bill's amount and gives no reason, and
+// with `style` the tone: no breakdown outside a dispute, firm cites the amount and the reply-by
+// date without softeners, polite asks courteously.
 export function findProblems(
   draft: Draft,
   allowedNumbers: Set<string>,
   references: Reference[],
   dispute?: { intent: string; amount?: number },
+  style?: { tone: Tone; replyBy: string; amount?: number },
 ): string[] {
   const text = `${draft.subject}\n${draft.body}`;
   const problems: string[] = [];
@@ -208,6 +231,22 @@ export function findProblems(
   const unknown = [...numbersIn(text)].filter((n) => !allowedNumbers.has(n));
   if (unknown.length > 0) {
     problems.push(`It contains figures that are not in the document data: ${unknown.join(", ")}. Remove them.`);
+  }
+
+  if (!dispute && BREAKDOWN.test(draft.body)) {
+    problems.push("It asks for an itemized breakdown, which only makes sense when disputing a bill. Remove it.");
+  }
+  if (style?.tone === "firm") {
+    if (!draft.body.includes(style.replyBy)) {
+      problems.push(`It doesn't ask for a written response by ${style.replyBy}. Add that exact date.`);
+    }
+    if (style.amount !== undefined && !numbersIn(draft.body).has(String(style.amount))) {
+      problems.push(`It doesn't cite the amount (${style.amount}). Include it.`);
+    }
+    const softener = draft.body.match(SOFTENERS);
+    if (softener) problems.push(`A firm letter has no softeners ("${softener[0]}"). Be direct.`);
+  } else if (style?.tone === "polite" && !COURTEOUS.test(draft.body)) {
+    problems.push('It isn\'t courteous. Ask politely ("I would like to ...", "Could you please ...").');
   }
 
   if (dispute) {
@@ -315,10 +354,10 @@ export function templateDraft(
       tone === "firm"
         ? `I dispute ${charge}${dated}.\n\n` +
           `Please review this bill, correct it if needed, and send me an itemized breakdown of the amount.\n\n` +
-          `Please reply in writing by ${replyBy}.`
+          `I expect a written response by ${replyBy}.`
         : `I would like to dispute ${charge}${dated}.\n\n` +
           `Could you please review this bill, correct it if needed, and send me an itemized breakdown?\n\n` +
-          `Thank you for your help. I would appreciate a reply by ${replyBy}.`;
+          `Thank you very much for your help. I would appreciate a reply by ${replyBy}.`;
     return { subject: `Dispute: ${about}`, body };
   }
 
@@ -331,10 +370,9 @@ export function templateDraft(
   const body =
     tone === "firm"
       ? `I am writing to ${goal} regarding ${about}.${amountSentence}\n\n` +
-        `Please review the account and send me an itemized breakdown of the amount.\n\n` +
-        `Please reply in writing by ${replyBy}.`
-      : `I am writing to ${goal} regarding ${about}.${amountSentence}\n\n` +
-        `Could you please let me know what options are available?\n\n` +
-        `Thank you for your help. I would appreciate a reply by ${replyBy}.`;
+        `Please confirm in writing by ${replyBy} whether you accept this request.`
+      : `I would like to ${goal} regarding ${about}.${amountSentence}\n\n` +
+        `Could you please let me know whether this is possible and what options are available?\n\n` +
+        `Thank you very much for your help. I would appreciate a reply by ${replyBy}.`;
   return { subject: `${capitalized}: ${about}`, body };
 }
